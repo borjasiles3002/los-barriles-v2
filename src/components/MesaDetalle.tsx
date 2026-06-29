@@ -1,11 +1,16 @@
 import { useState } from 'react';
-import type { Mesa, Pedido, Producto, Categoria, PedidoEstado, MetodoPago } from '../types';
+import type { Mesa, Pedido, Producto, Categoria, PedidoEstado, MetodoPago, Cliente } from '../types';
 import {
   agregarProducto, quitarProducto,
   cambiarEstadoPedido, cerrarPedido,
-  pedirCuenta,
+  pedirCuenta, asignarClienteAPedido,
 } from '../services/pedidos.service';
 import { registrarIngreso } from '../services/ingresos.service';
+import { buscarClientes, crearCliente, registrarVisitaCliente } from '../services/clientes.service';
+import {
+  emitirFactura, generarPDFFactura, generarPDFTicket, getConfigRestaurante,
+} from '../services/facturasEmitidas.service';
+import { StockBadge } from './AperturaView';
 import { LoadingSpinner } from './ui/LoadingSpinner';
 
 interface Props {
@@ -47,8 +52,17 @@ export function MesaDetalle({ mesa, pedido, categorias, productos, onClose }: Pr
   const [activeCat, setActiveCat]             = useState<string>(categorias[0]?.id ?? '');
   const [loadingAction, setLoadingAction]     = useState(false);
   const [showCobroModal, setShowCobroModal]   = useState(false);
-  const [notaPendiente, setNotaPendiente]     = useState<string | null>(null); // productoId que espera nota
+  const [emitirFacturaFlag, setEmitirFacturaFlag] = useState(false);
+  const [notaPendiente, setNotaPendiente]     = useState<string | null>(null);
   const [notaTexto, setNotaTexto]             = useState('');
+  // Cliente
+  const [showClienteModal, setShowClienteModal] = useState(false);
+  const [clienteBusqueda,  setClienteBusqueda]  = useState('');
+  const [clienteResultados, setClienteResultados] = useState<Cliente[]>([]);
+  const [clienteBuscando,  setClienteBuscando]  = useState(false);
+  const [clienteAsignado,  setClienteAsignado]  = useState<Cliente | null>(null);
+  const [showNuevoCliente, setShowNuevoCliente] = useState(false);
+  const [nuevoClienteForm, setNuevoClienteForm] = useState({ nombre: '', apellidos: '', nif: '', email: '' });
 
   const elapsed = Math.floor(
     (Date.now() - new Date(pedido.createdAt).getTime()) / 60000,
@@ -107,6 +121,26 @@ export function MesaDetalle({ mesa, pedido, categorias, productos, onClose }: Pr
     finally { setLoadingAction(false); }
   };
 
+  const handleBuscarCliente = async () => {
+    if (!clienteBusqueda.trim()) return;
+    setClienteBuscando(true);
+    const res = await buscarClientes(clienteBusqueda);
+    setClienteResultados(res);
+    setClienteBuscando(false);
+  };
+
+  const handleAsignarCliente = async (cliente: Cliente) => {
+    await asignarClienteAPedido(pedido.id, cliente.id, `${cliente.nombre} ${cliente.apellidos}`);
+    setClienteAsignado(cliente);
+    setShowClienteModal(false);
+  };
+
+  const handleCrearNuevoCliente = async () => {
+    if (!nuevoClienteForm.nombre || !nuevoClienteForm.apellidos) return;
+    const id = await crearCliente({ ...nuevoClienteForm });
+    await handleAsignarCliente({ id, ...nuevoClienteForm, totalVisitas: 0, totalGastado: 0, creadoEn: new Date().toISOString() });
+  };
+
   const handleCobrar = async (metodo: MetodoPago) => {
     setLoadingAction(true);
     try {
@@ -116,6 +150,27 @@ export function MesaDetalle({ mesa, pedido, categorias, productos, onClose }: Pr
         pedido.lineas, pedido.total, metodo,
         pedido.camareroId ?? '', pedido.camareroNombre ?? '',
       );
+
+      // Registrar visita en cliente
+      if (clienteAsignado) {
+        await registrarVisitaCliente(clienteAsignado.id, pedido.total);
+      }
+
+      // Generar PDF
+      const config = await getConfigRestaurante();
+      if (emitirFacturaFlag && clienteAsignado) {
+        const factura = await emitirFactura({
+          pedidoId:   pedido.id,
+          mesaNombre: mesa.nombre,
+          lineas:     pedido.lineas,
+          total:      pedido.total,
+          cliente:    clienteAsignado,
+        });
+        await generarPDFFactura(factura, config);
+      } else {
+        await generarPDFTicket(pedido.id, mesa.nombre, pedido.lineas, pedido.total, config);
+      }
+
       setShowCobroModal(false);
       onClose();
     } catch (e) { console.error(e); }
@@ -134,6 +189,20 @@ export function MesaDetalle({ mesa, pedido, categorias, productos, onClose }: Pr
             {mesa.comensales && (
               <p className="text-slate-400 text-sm text-center">{mesa.comensales} comensales · {(pedido.total / mesa.comensales).toFixed(2)}€/persona</p>
             )}
+            {clienteAsignado && (
+              <label className="flex items-center gap-3 bg-slate-700 rounded-xl px-4 py-3 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={emitirFacturaFlag}
+                  onChange={e => setEmitirFacturaFlag(e.target.checked)}
+                  className="w-5 h-5 rounded accent-amber-500"
+                />
+                <div>
+                  <p className="text-white font-semibold text-sm">Emitir factura fiscal</p>
+                  <p className="text-slate-400 text-xs">{clienteAsignado.nombre} {clienteAsignado.apellidos}</p>
+                </div>
+              </label>
+            )}
             <div className="grid grid-cols-2 gap-3">
               {METODOS_PAGO.map(({ key, label, icon }) => (
                 <button key={key} onClick={() => handleCobrar(key)} disabled={loadingAction}
@@ -147,6 +216,81 @@ export function MesaDetalle({ mesa, pedido, categorias, productos, onClose }: Pr
               className="w-full py-3 text-slate-400 hover:text-white font-bold transition-colors">
               Cancelar
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* ── Modal cliente ── */}
+      {showClienteModal && (
+        <div className="fixed inset-0 z-[60] flex items-end bg-black/70 backdrop-blur-sm"
+          onClick={() => setShowClienteModal(false)}>
+          <div className="w-full bg-slate-800 rounded-t-2xl p-5 space-y-3 max-h-[80vh] overflow-y-auto"
+            onClick={e => e.stopPropagation()}>
+            <h3 className="text-white font-black text-lg">Asignar cliente</h3>
+
+            {!showNuevoCliente ? (
+              <>
+                {clienteAsignado && (
+                  <div className="flex items-center justify-between bg-blue-900/40 rounded-xl px-3 py-2">
+                    <span className="text-blue-300 text-sm">👤 {clienteAsignado.nombre} {clienteAsignado.apellidos}</span>
+                    <button onClick={() => { setClienteAsignado(null); setShowClienteModal(false); }}
+                      className="text-red-400 text-xs hover:text-red-300">Quitar</button>
+                  </div>
+                )}
+                <div className="flex gap-2">
+                  <input
+                    value={clienteBusqueda}
+                    onChange={e => setClienteBusqueda(e.target.value)}
+                    onKeyDown={e => { if (e.key === 'Enter') void handleBuscarCliente(); }}
+                    placeholder="Buscar por nombre, empresa o NIF…"
+                    className="flex-1 bg-slate-700 text-white rounded-xl px-3 py-2.5 text-sm focus:outline-none"
+                  />
+                  <button onClick={() => void handleBuscarCliente()} disabled={clienteBuscando}
+                    className="px-4 rounded-xl bg-amber-500 text-white text-sm font-bold">
+                    {clienteBuscando ? '…' : 'Buscar'}
+                  </button>
+                </div>
+                <div className="space-y-2">
+                  {clienteResultados.map(c => (
+                    <button key={c.id} onClick={() => void handleAsignarCliente(c)}
+                      className="w-full text-left px-3 py-2.5 bg-slate-700 hover:bg-slate-600 rounded-xl transition flex items-center gap-3">
+                      <div className="w-8 h-8 rounded-full bg-blue-700 flex items-center justify-center text-white font-bold text-sm flex-shrink-0">
+                        {c.nombre[0]}
+                      </div>
+                      <div>
+                        <p className="text-white text-sm font-medium">{c.nombre} {c.apellidos}</p>
+                        {c.empresa && <p className="text-slate-400 text-xs">{c.empresa}</p>}
+                        {c.nif && <p className="text-slate-500 text-xs">NIF: {c.nif}</p>}
+                      </div>
+                    </button>
+                  ))}
+                </div>
+                <button onClick={() => setShowNuevoCliente(true)}
+                  className="w-full py-2.5 rounded-xl bg-slate-700 text-slate-300 text-sm hover:bg-slate-600 transition">
+                  + Crear cliente nuevo
+                </button>
+              </>
+            ) : (
+              <>
+                <p className="text-slate-400 text-sm">Datos mínimos del cliente</p>
+                <div className="grid grid-cols-2 gap-2">
+                  {(['nombre', 'apellidos', 'nif', 'email'] as const).map(k => (
+                    <input key={k}
+                      value={nuevoClienteForm[k]}
+                      onChange={e => setNuevoClienteForm(f => ({ ...f, [k]: e.target.value }))}
+                      placeholder={k.charAt(0).toUpperCase() + k.slice(1)}
+                      className="bg-slate-700 text-white rounded-xl px-3 py-2 text-sm focus:outline-none"
+                    />
+                  ))}
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <button onClick={() => setShowNuevoCliente(false)}
+                    className="py-3 bg-slate-700 text-white rounded-xl font-bold text-sm">← Volver</button>
+                  <button onClick={() => void handleCrearNuevoCliente()}
+                    className="py-3 bg-amber-500 text-black rounded-xl font-bold text-sm">Crear y asignar</button>
+                </div>
+              </>
+            )}
           </div>
         </div>
       )}
@@ -198,6 +342,17 @@ export function MesaDetalle({ mesa, pedido, categorias, productos, onClose }: Pr
             </span>
             <span className="text-slate-400 text-xs">{elapsed}m</span>
             {mesa.comensales && <span className="text-slate-500 text-xs">{mesa.comensales} com.</span>}
+            {clienteAsignado ? (
+              <button onClick={() => setShowClienteModal(true)}
+                className="text-[10px] px-2 py-0.5 rounded-full bg-blue-900 text-blue-300 font-bold">
+                👤 {clienteAsignado.nombre}
+              </button>
+            ) : (
+              <button onClick={() => setShowClienteModal(true)}
+                className="text-[10px] px-2 py-0.5 rounded-full bg-slate-700 text-slate-400 hover:bg-slate-600 transition">
+                + Cliente
+              </button>
+            )}
           </div>
         </div>
 
@@ -241,14 +396,19 @@ export function MesaDetalle({ mesa, pedido, categorias, productos, onClose }: Pr
             ) : (
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
                 {productosDeCat.map(prod => {
-                  const esBarra = prod.destino === 'barra' || prod.destino === 'ambos';
-                  const qty     = pedido.lineas.filter(l => l.productoId === prod.id).reduce((s, l) => s + l.cantidad, 0);
+                  const esBarra  = prod.destino === 'barra' || prod.destino === 'ambos';
+                  const qty      = pedido.lineas.filter(l => l.productoId === prod.id).reduce((s, l) => s + l.cantidad, 0);
+                  const agotado  = prod.controlStock && (prod.stockActual ?? 0) === 0;
                   return (
-                    <button key={prod.id} onClick={() => handleTapProduct(prod)}
-                      className={`border rounded-xl p-3 text-left transition-all active:scale-95 flex flex-col gap-1 relative ${
-                        esBarra
-                          ? 'bg-blue-950/40 border-blue-700/50 hover:border-blue-400'
-                          : 'bg-slate-800 border-slate-600 hover:border-amber-500'
+                    <button key={prod.id}
+                      onClick={() => !agotado && handleTapProduct(prod)}
+                      disabled={agotado}
+                      className={`border rounded-xl p-3 text-left transition-all flex flex-col gap-1 relative ${
+                        agotado
+                          ? 'bg-slate-800/30 border-slate-700 opacity-50 cursor-not-allowed'
+                          : esBarra
+                            ? 'bg-blue-950/40 border-blue-700/50 hover:border-blue-400 active:scale-95'
+                            : 'bg-slate-800 border-slate-600 hover:border-amber-500 active:scale-95'
                       }`}>
                       {qty > 0 && (
                         <span className="absolute top-2 right-2 bg-amber-500 text-black text-[10px] font-black px-1.5 py-0.5 rounded-full">
@@ -260,12 +420,17 @@ export function MesaDetalle({ mesa, pedido, categorias, productos, onClose }: Pr
                           ? <span className="text-blue-400">🍺 Barra</span>
                           : <span className="text-emerald-500">🍳 Cocina</span>}
                       </span>
-                      <span className="text-white font-bold text-sm leading-tight line-clamp-2">
+                      <span className={`font-bold text-sm leading-tight line-clamp-2 ${agotado ? 'line-through text-slate-500' : 'text-white'}`}>
                         {prod.nombre}
                       </span>
                       <span className={`font-black text-base mt-auto ${esBarra ? 'text-blue-300' : 'text-amber-400'}`}>
                         {prod.precio.toFixed(2)}€
                       </span>
+                      {prod.controlStock && (
+                        <div className="mt-1">
+                          <StockBadge stock={prod.stockActual} />
+                        </div>
+                      )}
                     </button>
                   );
                 })}

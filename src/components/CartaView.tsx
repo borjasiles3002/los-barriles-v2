@@ -5,7 +5,7 @@ import {
   addProducto, updateProducto, deleteProducto,
   toggleProductoDisponible,
 } from '../services/carta.service';
-import type { Categoria, Producto, DestinoProducto } from '../types';
+import type { Categoria, Producto, DestinoProducto, TipoIva } from '../types';
 import { LoadingSpinner } from './ui/LoadingSpinner';
 
 // ─── Categoria form ────────────────────────────────────────────────────────────
@@ -76,19 +76,21 @@ function ProductoForm({
   onSave: (data: Omit<Producto, 'id'>) => Promise<void>;
   onCancel: () => void;
 }) {
-  const [nombre, setNombre]         = useState(initial?.nombre ?? '');
-  const [precio, setPrecio]         = useState(initial?.precio?.toString() ?? '');
-  const [descripcion, setDesc]      = useState(initial?.descripcion ?? '');
-  const [categoriaId, setCatId]     = useState(initial?.categoriaId ?? categorias[0]?.id ?? '');
-  const [disponible, setDisponible] = useState(initial?.disponible ?? true);
-  const [destino, setDestino]       = useState<DestinoProducto>(initial?.destino ?? 'cocina');
-  const [loading, setLoading]       = useState(false);
+  const [nombre,       setNombre]       = useState(initial?.nombre ?? '');
+  const [precio,       setPrecio]       = useState(initial?.precio?.toString() ?? '');
+  const [descripcion,  setDesc]         = useState(initial?.descripcion ?? '');
+  const [categoriaId,  setCatId]        = useState(initial?.categoriaId ?? categorias[0]?.id ?? '');
+  const [disponible,   setDisponible]   = useState(initial?.disponible ?? true);
+  const [destino,      setDestino]      = useState<DestinoProducto>(initial?.destino ?? 'cocina');
+  const [tipoIva,      setTipoIva]      = useState<TipoIva>(initial?.tipoIva ?? 'reducido');
+  const [controlStock, setControlStock] = useState(initial?.controlStock ?? false);
+  const [loading,      setLoading]      = useState(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
     try {
-      await onSave({ nombre, precio: parseFloat(precio), descripcion, categoriaId, disponible, destino });
+      await onSave({ nombre, precio: parseFloat(precio), descripcion, categoriaId, disponible, destino, tipoIva, controlStock });
     } finally {
       setLoading(false);
     }
@@ -128,10 +130,24 @@ function ProductoForm({
             <option value="ambos">🔀 Ambos — cocina y barra</option>
           </select>
         </div>
-        <div className="flex items-center gap-2">
-          <input type="checkbox" id="disp" checked={disponible} onChange={e => setDisponible(e.target.checked)}
-            className="rounded" />
-          <label htmlFor="disp" className="text-slate-300 text-sm">Disponible</label>
+        <div>
+          <label className="block text-slate-400 text-xs mb-1">Tipo IVA</label>
+          <select value={tipoIva} onChange={e => setTipoIva(e.target.value as TipoIva)}
+            className="w-full bg-slate-800 border border-slate-600 text-white rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-amber-500">
+            <option value="reducido">Reducido 10% (alimentos, restauración)</option>
+            <option value="normal">Normal 21% (bebidas alcohólicas)</option>
+            <option value="superreducido">Superreducido 4%</option>
+          </select>
+        </div>
+        <div className="flex items-center gap-4">
+          <div className="flex items-center gap-2">
+            <input type="checkbox" id="disp" checked={disponible} onChange={e => setDisponible(e.target.checked)} className="rounded" />
+            <label htmlFor="disp" className="text-slate-300 text-sm">Disponible</label>
+          </div>
+          <div className="flex items-center gap-2">
+            <input type="checkbox" id="ctrl" checked={controlStock} onChange={e => setControlStock(e.target.checked)} className="rounded" />
+            <label htmlFor="ctrl" className="text-slate-300 text-sm">Control de stock</label>
+          </div>
         </div>
       </div>
       <div className="flex gap-2 pt-1">
@@ -328,6 +344,14 @@ export const CartaView: React.FC = () => {
                           }`}>
                             {prod.destino === 'barra' ? '🍺 Barra' : prod.destino === 'ambos' ? '🔀 Ambos' : '🍳 Cocina'}
                           </span>
+                          <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-slate-700 text-slate-400">
+                            IVA {prod.tipoIva === 'normal' ? '21%' : prod.tipoIva === 'superreducido' ? '4%' : '10%'}
+                          </span>
+                          {prod.controlStock && (
+                            <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-amber-900/60 text-amber-400">
+                              📦 {prod.stockActual ?? '–'}
+                            </span>
+                          )}
                         </div>
                       </div>
                       <span className="text-amber-400 font-black shrink-0">{prod.precio.toFixed(2)}€</span>

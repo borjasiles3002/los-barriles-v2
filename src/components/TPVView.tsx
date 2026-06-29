@@ -5,9 +5,12 @@ import { usePedido } from '../hooks/usePedido';
 import { useCarta } from '../hooks/useCarta';
 import { useNotificaciones } from '../hooks/useNotificaciones';
 import { useAuthContext } from '../contexts/AuthContext';
+import { useProductosStock } from '../hooks/useStock';
 import { abrirMesa } from '../services/pedidos.service';
+import { ajustarStockProducto } from '../services/stock.service';
 import { MesaDetalle } from './MesaDetalle';
 import { NotificacionesBanner } from './NotificacionesBanner';
+import { StockBadge } from './AperturaView';
 import { Badge } from './ui/Badge';
 import { FullScreenLoader } from './ui/LoadingSpinner';
 
@@ -118,13 +121,15 @@ function MesaDetalleWrapper({ mesa, onClose }: { mesa: Mesa; onClose: () => void
 // ─── TPV View ─────────────────────────────────────────────────────────────────
 
 export function TPVView() {
-  const { user }            = useAuthContext();
-  const { mesas, loading }  = useMesas();
-  const { notificaciones }  = useNotificaciones();
+  const { user }               = useAuthContext();
+  const { mesas, loading }     = useMesas();
+  const { notificaciones }     = useNotificaciones();
+  const productosStock         = useProductosStock();
 
   const [selectedMesa, setSelectedMesa]         = useState<Mesa | null>(null);
   const [openingMesa, setOpeningMesa]           = useState<string | null>(null);
   const [comensalesModal, setComensalesModal]   = useState<Mesa | null>(null);
+  const [showStock, setShowStock]               = useState(false);
 
   if (loading) return <FullScreenLoader />;
 
@@ -171,14 +176,29 @@ export function TPVView() {
           <h1 className="text-white font-black text-lg">🍺 Los Barriles</h1>
           <p className="text-slate-400 text-xs">{user?.nombre}</p>
         </div>
-        <div className="relative">
-          <button className="p-2 rounded-lg bg-slate-700 text-slate-300">
-            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-                d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
-            </svg>
-          </button>
-          <Badge count={notificaciones.length} />
+        <div className="flex items-center gap-2">
+          {productosStock.length > 0 && (
+            <button
+              onClick={() => setShowStock(s => !s)}
+              className={`relative px-3 py-1.5 rounded-lg text-sm font-bold transition ${
+                showStock ? 'bg-amber-500 text-black' : 'bg-slate-700 text-slate-300'
+              }`}
+            >
+              📦 Stock
+              {productosStock.some(p => (p.stockActual ?? 1) <= 3) && (
+                <span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-red-500 rounded-full" />
+              )}
+            </button>
+          )}
+          <div className="relative">
+            <button className="p-2 rounded-lg bg-slate-700 text-slate-300">
+              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                  d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
+              </svg>
+            </button>
+            <Badge count={notificaciones.length} />
+          </div>
         </div>
       </div>
 
@@ -200,6 +220,34 @@ export function TPVView() {
           ))}
         </div>
       </div>
+
+      {/* Panel stock */}
+      {showStock && productosStock.length > 0 && (
+        <div className="fixed inset-0 z-40 flex items-end" onClick={() => setShowStock(false)}>
+          <div className="w-full bg-slate-800 rounded-t-2xl p-4 max-h-[60vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-white font-bold">Stock en tiempo real</h3>
+              <button onClick={() => setShowStock(false)} className="text-slate-400 hover:text-white">×</button>
+            </div>
+            <div className="space-y-2">
+              {productosStock.map(p => (
+                <div key={p.id} className="flex items-center gap-3 bg-slate-700 rounded-xl px-3 py-2.5">
+                  <span className={`flex-1 text-sm ${(p.stockActual ?? 0) === 0 ? 'line-through text-slate-500' : 'text-white'}`}>
+                    {p.nombre}
+                  </span>
+                  <StockBadge stock={p.stockActual} />
+                  <button
+                    onClick={() => void ajustarStockProducto(p.id, 5)}
+                    className="px-2.5 py-1 rounded-lg bg-emerald-800 text-emerald-300 text-xs hover:bg-emerald-700 transition"
+                  >
+                    +5
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Detalle de mesa */}
       {showDetail && liveMesa && (

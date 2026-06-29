@@ -3,7 +3,7 @@ import {
   runTransaction, getDocs, query, where,
 } from 'firebase/firestore';
 import { db } from '../firebase';
-import type { Pedido, LineaPedido, PedidoEstado, Producto, DestinoProducto } from '../types';
+import type { Pedido, LineaPedido, PedidoEstado, Producto, DestinoProducto, TipoIva } from '../types';
 
 // ─── Abrir mesa ─────────────────────────────────────────────────────────────
 
@@ -43,33 +43,64 @@ export async function agregarProducto(
 ): Promise<void> {
   const pedidoRef = doc(db, 'pedidos', pedidoId);
   const destino: DestinoProducto = producto.destino ?? 'cocina';
+  const tipoIva: TipoIva = producto.tipoIva ?? 'reducido';
+  const prodRef = producto.controlStock ? doc(db, 'productos', producto.id) : null;
 
   await runTransaction(db, async (t) => {
     const snap = await t.get(pedidoRef);
     if (!snap.exists()) throw new Error('Pedido no encontrado');
 
+    // Read stock if needed (must precede all writes)
+    const prodSnap = prodRef ? await t.get(prodRef) : null;
+
     const data   = snap.data() as Omit<Pedido, 'id'>;
     const lineas: LineaPedido[] = [...(data.lineas ?? [])];
 
-    // Agrupar por productoId + notas (notas diferentes = líneas distintas)
     const idx = lineas.findIndex(l => l.productoId === producto.id && (l.notas ?? '') === notas);
     if (idx >= 0) {
       lineas[idx] = { ...lineas[idx], cantidad: lineas[idx].cantidad + 1 };
     } else {
       lineas.push({
-        id:         `l-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-        productoId: producto.id,
-        nombre:     producto.nombre,
-        precio:     producto.precio,
-        cantidad:   1,
-        estado:     'pendiente',
+        id:           `l-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+        productoId:   producto.id,
+        nombre:       producto.nombre,
+        precio:       producto.precio,
+        cantidad:     1,
+        estado:       'pendiente',
         destino,
-        notas:      notas || undefined,
+        tipoIva,
+        controlStock: producto.controlStock ?? false,
+        notas:        notas || undefined,
       });
     }
 
     const total = lineas.reduce((s, l) => s + l.precio * l.cantidad, 0);
     t.update(pedidoRef, { lineas, total });
+
+    // Decrement stock
+    if (prodRef && prodSnap?.exists()) {
+      const stockActual = (prodSnap.data()['stockActual'] as number) ?? 0;
+      if (stockActual <= 0) throw new Error('STOCK_AGOTADO');
+      const nuevoStock = stockActual - 1;
+      const prodUpdate: Record<string, unknown> = { stockActual: nuevoStock };
+      if (nuevoStock === 0) {
+        prodUpdate['disponible'] = false;
+        const notifRef = doc(collection(db, 'notificaciones'));
+        t.set(notifRef, {
+          tipo: 'stock_agotado', productoId: producto.id,
+          productoNombre: producto.nombre, stockActual: 0,
+          leido: false, createdAt: new Date().toISOString(),
+        });
+      } else if (nuevoStock === 3) {
+        const notifRef = doc(collection(db, 'notificaciones'));
+        t.set(notifRef, {
+          tipo: 'stock_bajo', productoId: producto.id,
+          productoNombre: producto.nombre, stockActual: nuevoStock,
+          leido: false, createdAt: new Date().toISOString(),
+        });
+      }
+      t.update(prodRef, prodUpdate);
+    }
   });
 }
 
@@ -87,6 +118,12 @@ export async function quitarProducto(pedidoId: string, lineaId: string): Promise
     const idx = lineas.findIndex(l => l.id === lineaId);
     if (idx < 0) return;
 
+    const linea = lineas[idx];
+    const prodRef = linea.controlStock ? doc(db, 'productos', linea.productoId) : null;
+
+    // Read stock before any writes
+    const prodSnap = prodRef ? await t.get(prodRef) : null;
+
     if (lineas[idx].cantidad > 1) {
       lineas[idx] = { ...lineas[idx], cantidad: lineas[idx].cantidad - 1 };
     } else {
@@ -95,7 +132,26 @@ export async function quitarProducto(pedidoId: string, lineaId: string): Promise
 
     const total = lineas.reduce((s, l) => s + l.precio * l.cantidad, 0);
     t.update(pedidoRef, { lineas, total });
+
+    // Restore stock
+    if (prodRef && prodSnap?.exists()) {
+      const stockActual = (prodSnap.data()['stockActual'] as number) ?? 0;
+      const nuevoStock  = stockActual + 1;
+      const prodUpdate: Record<string, unknown> = { stockActual: nuevoStock };
+      if (stockActual === 0) prodUpdate['disponible'] = true;
+      t.update(prodRef, prodUpdate);
+    }
   });
+}
+
+// ─── Asignar cliente a pedido ────────────────────────────────────────────────
+
+export async function asignarClienteAPedido(
+  pedidoId: string,
+  clienteId: string,
+  clienteNombre: string,
+): Promise<void> {
+  await updateDoc(doc(db, 'pedidos', pedidoId), { clienteId, clienteNombre });
 }
 
 // ─── Cambiar estado del pedido ───────────────────────────────────────────────

@@ -23,6 +23,9 @@ import { HorasView } from './components/HorasView';
 import { MensajesView } from './components/MensajesView';
 import { TareasView } from './components/TareasView';
 import { PerfilView } from './components/PerfilView';
+import { AperturaView } from './components/AperturaView';
+import { ClientesView } from './components/ClientesView';
+import { ConfigRestauranteView } from './components/ConfigRestauranteView';
 import { FullScreenLoader } from './components/ui/LoadingSpinner';
 import { Badge } from './components/ui/Badge';
 import { useAlertas } from './hooks/useAlertas';
@@ -49,7 +52,8 @@ type View =
   | 'tpv' | 'kitchen' | 'sala' | 'carta'
   | 'dashboard' | 'informes' | 'gastos' | 'cierre'
   | 'facturas' | 'stock' | 'escandallos' | 'rentabilidad' | 'alertas'
-  | 'personal' | 'horas' | 'mensajes' | 'tareas' | 'perfil';
+  | 'personal' | 'horas' | 'mensajes' | 'tareas' | 'perfil'
+  | 'apertura' | 'clientes' | 'config';
 
 const VIEW_LABELS: Record<View, string> = {
   tpv:          '🍺 TPV',
@@ -70,18 +74,21 @@ const VIEW_LABELS: Record<View, string> = {
   mensajes:     '💬 Mensajes',
   tareas:       '✅ Tareas',
   perfil:       '👤 Perfil',
+  apertura:     '🌅 Apertura',
+  clientes:     '🏷 Clientes',
+  config:       '⚙ Config',
 };
 
 const VIEWS_GERENTE: View[] = [
-  'tpv', 'sala', 'carta', 'personal', 'horas', 'tareas', 'mensajes',
+  'tpv', 'sala', 'carta', 'apertura', 'clientes', 'personal', 'horas', 'tareas', 'mensajes',
   'dashboard', 'informes', 'gastos', 'cierre', 'facturas', 'stock',
-  'escandallos', 'rentabilidad', 'alertas', 'perfil',
+  'escandallos', 'rentabilidad', 'alertas', 'config', 'perfil',
 ];
 
 const ROLE_VIEWS: Record<Role, View[]> = {
   gerente:  VIEWS_GERENTE,
   admin:    VIEWS_GERENTE,
-  manager:  ['tpv', 'sala', 'carta', 'personal', 'horas', 'tareas', 'mensajes', 'dashboard', 'informes', 'gastos', 'cierre', 'perfil'],
+  manager:  ['tpv', 'sala', 'carta', 'apertura', 'clientes', 'personal', 'horas', 'tareas', 'mensajes', 'dashboard', 'informes', 'gastos', 'cierre', 'perfil'],
   camarero: ['tpv', 'sala', 'tareas', 'mensajes', 'perfil'],
   barman:   ['tpv', 'tareas', 'mensajes', 'perfil'],
   cocinero: ['kitchen', 'stock', 'tareas', 'mensajes', 'perfil'],
@@ -242,6 +249,9 @@ function MainApp() {
           onUpdate={updated => setLocalUser(updated)}
         />
       )}
+      {safeView === 'apertura'     && <AperturaView />}
+      {safeView === 'clientes'     && <ClientesView />}
+      {safeView === 'config'       && <ConfigRestauranteView />}
 
       {showNav && (
         <NavBar

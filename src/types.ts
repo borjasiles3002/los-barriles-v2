@@ -106,6 +106,13 @@ export type MesaEstado    = 'libre' | 'ocupada' | 'cuenta_pedida';
 export type PedidoEstado  = 'abierto' | 'en_cocina' | 'listo' | 'cuenta_pedida' | 'cerrado';
 export type LineaEstado   = 'pendiente' | 'en_preparacion' | 'listo';
 export type DestinoProducto = 'barra' | 'cocina' | 'ambos';
+export type TipoIva = 'reducido' | 'superreducido' | 'normal';
+
+export const IVA_RATES: Record<TipoIva, number> = {
+  reducido:      0.10,
+  superreducido: 0.04,
+  normal:        0.21,
+};
 
 export interface Mesa {
   id: string;
@@ -127,6 +134,8 @@ export interface LineaPedido {
   estado: LineaEstado;
   destino: DestinoProducto;
   notas?: string;
+  tipoIva?: TipoIva;
+  controlStock?: boolean;
 }
 
 export interface Pedido {
@@ -140,6 +149,8 @@ export interface Pedido {
   closedAt?: string;
   camareroId?: string;
   camareroNombre?: string;
+  clienteId?: string;
+  clienteNombre?: string;
 }
 
 // ─── Carta ────────────────────────────────────────────────────────────────────
@@ -157,17 +168,25 @@ export interface Producto {
   precio: number;
   descripcion: string;
   disponible: boolean;
-  destino?: DestinoProducto;  // undefined → tratar como 'cocina'
+  destino?: DestinoProducto;
+  tipoIva?: TipoIva;
+  controlStock?: boolean;
+  stockActual?: number | null;
 }
 
 // ─── Notificaciones & Cierres ─────────────────────────────────────────────────
 
 export interface Notificacion {
   id: string;
-  tipo: 'pedido_listo' | 'cuenta_pedida';
-  mesaId: string;
-  pedidoId: string;
-  mesaNombre: string;
+  tipo: 'pedido_listo' | 'cuenta_pedida' | 'stock_agotado' | 'stock_bajo';
+  // Pedido notifications
+  mesaId?: string;
+  pedidoId?: string;
+  mesaNombre?: string;
+  // Stock notifications
+  productoId?: string;
+  productoNombre?: string;
+  stockActual?: number;
   leido: boolean;
   createdAt: string;
 }
@@ -288,6 +307,82 @@ export interface Proveedor {
 export interface ChatMessage {
   role: 'user' | 'model';
   text: string;
+}
+
+// ─── Clientes ─────────────────────────────────────────────────────────────────
+
+export interface Cliente {
+  id: string;
+  nombre: string;
+  apellidos: string;
+  empresa?: string;
+  nif?: string;
+  email?: string;
+  telefono?: string;
+  direccion?: string;
+  cp?: string;
+  ciudad?: string;
+  notas?: string;
+  totalVisitas: number;
+  totalGastado: number;
+  ultimaVisita?: string;
+  creadoEn: string;
+}
+
+// ─── Facturas emitidas ────────────────────────────────────────────────────────
+
+export interface LineaFactura {
+  nombre: string;
+  cantidad: number;
+  precioConIva: number;
+  base: number;
+  iva: number;
+  tipoIva: TipoIva;
+}
+
+export interface FacturaEmitida {
+  id: string;
+  numero: string;
+  fecha: string;
+  clienteId?: string;
+  clienteNombre?: string;
+  clienteNif?: string;
+  clienteDireccion?: string;
+  lineas: LineaFactura[];
+  bases: Record<TipoIva, number>;
+  cuotasIva: Record<TipoIva, number>;
+  total: number;
+  pedidoId: string;
+  mesaNombre: string;
+  creadaEn: string;
+}
+
+// ─── Configuración restaurante ────────────────────────────────────────────────
+
+export interface ConfigRestaurante {
+  nombre: string;
+  nif: string;
+  direccion: string;
+  cp: string;
+  ciudad: string;
+  telefono: string;
+  email: string;
+  logo?: string;
+  iban?: string;
+}
+
+// ─── Stock diario ─────────────────────────────────────────────────────────────
+
+export interface StockDiarioItem {
+  productoId: string;
+  nombre: string;
+  inicial: number;
+}
+
+export interface StockDiario {
+  id: string;
+  fecha: string;
+  items: Record<string, StockDiarioItem>;
 }
 
 // ─── Módulo Ingresos ──────────────────────────────────────────────────────────
