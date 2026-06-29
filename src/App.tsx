@@ -17,26 +17,39 @@ import { InformesView } from './components/InformesView';
 import { RentabilidadView } from './components/RentabilidadView';
 import { CierreView } from './components/CierreView';
 import { ChatIA } from './components/ChatIA';
+import { FichajeScreen } from './components/FichajeScreen';
+import { PersonalView } from './components/PersonalView';
+import { HorasView } from './components/HorasView';
+import { MensajesView } from './components/MensajesView';
+import { TareasView } from './components/TareasView';
+import { PerfilView } from './components/PerfilView';
 import { FullScreenLoader } from './components/ui/LoadingSpinner';
 import { Badge } from './components/ui/Badge';
 import { useAlertas } from './hooks/useAlertas';
+import { useTotalNoLeidos } from './hooks/useMensajes';
+import { useTareasPendientesCount } from './hooks/useTareas';
 import { signOut } from 'firebase/auth';
 import { auth } from './firebase';
-import type { Role } from './types';
+import type { AppUser, Role } from './types';
 
-// Detecta si la URL es una ruta de monitor dedicado
-function detectRoute(): 'cocina' | 'sala' | 'barra' | null {
+// ─── Routing ──────────────────────────────────────────────────────────────────
+
+function detectRoute(): 'cocina' | 'sala' | 'barra' | 'fichaje' | null {
   const path = window.location.pathname.toLowerCase();
-  if (path === '/cocina') return 'cocina';
-  if (path === '/sala')   return 'sala';
-  if (path === '/tpv')    return 'barra';
+  if (path === '/cocina')   return 'cocina';
+  if (path === '/sala')     return 'sala';
+  if (path === '/tpv')      return 'barra';
+  if (path === '/fichaje')  return 'fichaje';
   return null;
 }
+
+// ─── View types ───────────────────────────────────────────────────────────────
 
 type View =
   | 'tpv' | 'kitchen' | 'sala' | 'carta'
   | 'dashboard' | 'informes' | 'gastos' | 'cierre'
-  | 'facturas' | 'stock' | 'escandallos' | 'rentabilidad' | 'alertas';
+  | 'facturas' | 'stock' | 'escandallos' | 'rentabilidad' | 'alertas'
+  | 'personal' | 'horas' | 'mensajes' | 'tareas' | 'perfil';
 
 const VIEW_LABELS: Record<View, string> = {
   tpv:          '🍺 TPV',
@@ -52,26 +65,44 @@ const VIEW_LABELS: Record<View, string> = {
   escandallos:  '📐 Costes',
   rentabilidad: '🏆 Rentab.',
   alertas:      '🔔 Alertas',
+  personal:     '👥 Personal',
+  horas:        '⏱ Horas',
+  mensajes:     '💬 Mensajes',
+  tareas:       '✅ Tareas',
+  perfil:       '👤 Perfil',
 };
 
+const VIEWS_GERENTE: View[] = [
+  'tpv', 'sala', 'carta', 'personal', 'horas', 'tareas', 'mensajes',
+  'dashboard', 'informes', 'gastos', 'cierre', 'facturas', 'stock',
+  'escandallos', 'rentabilidad', 'alertas', 'perfil',
+];
+
 const ROLE_VIEWS: Record<Role, View[]> = {
-  admin:    ['tpv', 'kitchen', 'sala', 'carta', 'dashboard', 'informes', 'gastos', 'cierre', 'facturas', 'stock', 'escandallos', 'rentabilidad', 'alertas'],
-  manager:  ['tpv', 'kitchen', 'sala', 'carta', 'dashboard', 'informes', 'gastos', 'cierre', 'facturas', 'stock', 'escandallos', 'rentabilidad', 'alertas'],
-  camarero: ['tpv', 'sala'],
-  cocinero: ['kitchen', 'stock'],
+  gerente:  VIEWS_GERENTE,
+  admin:    VIEWS_GERENTE,
+  manager:  ['tpv', 'sala', 'carta', 'personal', 'horas', 'tareas', 'mensajes', 'dashboard', 'informes', 'gastos', 'cierre', 'perfil'],
+  camarero: ['tpv', 'sala', 'tareas', 'mensajes', 'perfil'],
+  barman:   ['tpv', 'tareas', 'mensajes', 'perfil'],
+  cocinero: ['kitchen', 'stock', 'tareas', 'mensajes', 'perfil'],
 };
 
 const ROLE_DEFAULT: Record<Role, View> = {
+  gerente:  'tpv',
   admin:    'tpv',
   manager:  'tpv',
   camarero: 'tpv',
+  barman:   'tpv',
   cocinero: 'kitchen',
 };
 
-const IA_ROLES: Role[] = ['admin', 'manager'];
+const IA_ROLES: Role[] = ['gerente', 'admin', 'manager'];
+
+// ─── Nav bar ──────────────────────────────────────────────────────────────────
 
 function NavBar({
-  currentView, allowedViews, onNavigate, userName, onLogout, alertasBadge,
+  currentView, allowedViews, onNavigate, userName, onLogout,
+  alertasBadge, mensajesBadge, tareasBadge,
 }: {
   currentView:   View;
   allowedViews:  View[];
@@ -79,6 +110,8 @@ function NavBar({
   userName:      string;
   onLogout:      () => void;
   alertasBadge:  number;
+  mensajesBadge: number;
+  tareasBadge:   number;
 }) {
   return (
     <nav className="fixed bottom-0 left-0 right-0 z-40 bg-slate-900 border-t border-slate-700 flex items-center">
@@ -90,7 +123,9 @@ function NavBar({
             }`}>
             <span className="text-base leading-none">{VIEW_LABELS[v].split(' ')[0]}</span>
             <span className="whitespace-nowrap">{VIEW_LABELS[v].split(' ').slice(1).join(' ')}</span>
-            {v === 'alertas' && alertasBadge > 0 && <Badge count={alertasBadge} />}
+            {v === 'alertas'   && alertasBadge   > 0 && <Badge count={alertasBadge} />}
+            {v === 'mensajes'  && mensajesBadge  > 0 && <Badge count={mensajesBadge} />}
+            {v === 'tareas'    && tareasBadge    > 0 && <Badge count={tareasBadge} />}
           </button>
         ))}
       </div>
@@ -104,36 +139,43 @@ function NavBar({
   );
 }
 
-// ─── Vistas fullscreen de monitor (sin nav) ───────────────────────────────────
+// ─── Monitor / Fichaje views (fullscreen, requieren auth) ─────────────────────
 
-function MonitorView({ route }: { route: 'cocina' | 'sala' | 'barra' }) {
+function MonitorView({ route }: { route: 'cocina' | 'sala' | 'barra' | 'fichaje' }) {
   const { user, loading: authLoading } = useAuthContext();
   if (authLoading) return <FullScreenLoader />;
   if (!user)       return <LoginView />;
-  if (route === 'cocina') return <KitchenView />;
-  if (route === 'sala')   return <SalaView />;
+  if (route === 'cocina')   return <KitchenView />;
+  if (route === 'sala')     return <SalaView />;
+  if (route === 'fichaje')  return <FichajeScreen />;
   return <BarraTPVView />;
 }
 
-// ─── App principal ────────────────────────────────────────────────────────────
+// ─── App root ─────────────────────────────────────────────────────────────────
 
 export default function App() {
   const route = detectRoute();
-
-  // Rutas de monitor dedicado — sin seed, sin nav, sin chat
   if (route) return <MonitorView route={route} />;
-
-  // Aplicación normal
   return <MainApp />;
 }
 
+// ─── Main app ─────────────────────────────────────────────────────────────────
+
 function MainApp() {
   const { user, loading: authLoading } = useAuthContext();
-  const [seeding, setSeeding]           = useState(false);
-  const [seedDone, setSeedDone]         = useState(false);
-  const [currentView, setCurrentView]   = useState<View | null>(null);
-  const { alertas }                     = useAlertas(true);
-  const alertasBadge                    = alertas.length;
+  const [seeding,     setSeeding]     = useState(false);
+  const [seedDone,    setSeedDone]    = useState(false);
+  const [currentView, setCurrentView] = useState<View | null>(null);
+  const [localUser,   setLocalUser]   = useState<AppUser | null>(null);
+
+  const { alertas }     = useAlertas(true);
+  const alertasBadge    = alertas.length;
+  const mensajesBadge   = useTotalNoLeidos(user?.uid ?? '');
+  const tareasBadge     = useTareasPendientesCount(user?.uid ?? '');
+
+  useEffect(() => {
+    if (user) setLocalUser(user);
+  }, [user]);
 
   useEffect(() => {
     if (!user || seedDone) return;
@@ -150,7 +192,7 @@ function MainApp() {
         setSeeding(false);
       }
     };
-    runSeed();
+    void runSeed();
   }, [user, seedDone]);
 
   useEffect(() => {
@@ -166,13 +208,14 @@ function MainApp() {
   if (authLoading || seeding) {
     return <FullScreenLoader message={seeding ? 'Iniciando datos...' : undefined} />;
   }
-  if (!user)         return <LoginView />;
-  if (!currentView)  return <FullScreenLoader />;
+  if (!user)        return <LoginView />;
+  if (!currentView) return <FullScreenLoader />;
 
-  const allowedViews = ROLE_VIEWS[user.role];
+  const allowedViews = ROLE_VIEWS[user.role] ?? ROLE_VIEWS['camarero'];
   const safeView: View = allowedViews.includes(currentView) ? currentView : allowedViews[0];
   const showNav  = allowedViews.length > 1;
   const showChat = IA_ROLES.includes(user.role);
+  const activeUser = localUser ?? user;
 
   return (
     <div className={showNav ? 'pb-16' : ''}>
@@ -189,15 +232,27 @@ function MainApp() {
       {safeView === 'escandallos'  && <EscandallosView />}
       {safeView === 'rentabilidad' && <RentabilidadView />}
       {safeView === 'alertas'      && <AlertasView />}
+      {safeView === 'personal'     && <PersonalView />}
+      {safeView === 'horas'        && <HorasView />}
+      {safeView === 'mensajes'     && <MensajesView user={activeUser} />}
+      {safeView === 'tareas'       && <TareasView user={activeUser} />}
+      {safeView === 'perfil'       && (
+        <PerfilView
+          user={activeUser}
+          onUpdate={updated => setLocalUser(updated)}
+        />
+      )}
 
       {showNav && (
         <NavBar
           currentView={safeView}
           allowedViews={allowedViews}
           onNavigate={setCurrentView}
-          userName={user.nombre}
-          onLogout={handleLogout}
+          userName={activeUser.nombre}
+          onLogout={() => void handleLogout()}
           alertasBadge={alertasBadge}
+          mensajesBadge={mensajesBadge}
+          tareasBadge={tareasBadge}
         />
       )}
 

@@ -1,12 +1,103 @@
 // ─── Auth / Users ─────────────────────────────────────────────────────────────
 
-export type Role = 'admin' | 'manager' | 'camarero' | 'cocinero';
+// admin = alias de gerente (retrocompatibilidad)
+export type Role = 'gerente' | 'admin' | 'manager' | 'cocinero' | 'camarero' | 'barman';
+
+export function esGerente(role: Role): boolean {
+  return role === 'gerente' || role === 'admin';
+}
+
+export function esAdmin(role: Role): boolean {
+  return role === 'gerente' || role === 'admin' || role === 'manager';
+}
 
 export interface AppUser {
   uid: string;
   email: string;
   role: Role;
   nombre: string;
+  apellidos?: string;
+  telefono?: string;
+  pinHash?: string;
+  activo?: boolean;
+  fechaAlta?: string;
+  avatar?: string;
+}
+
+// ─── Personal ─────────────────────────────────────────────────────────────────
+
+export interface Trabajador extends AppUser {
+  // mismos campos que AppUser, alias semántico
+}
+
+export interface Fichaje {
+  id: string;
+  usuarioId: string;
+  nombre: string;
+  tipo: 'entrada' | 'salida';
+  timestamp: string;
+  fecha: string;
+  hora: string;
+}
+
+export interface Turno {
+  id: string;
+  usuarioId: string;
+  nombre: string;
+  fecha: string;
+  entrada: string;
+  salida?: string;
+  horasTrabajadas?: number;
+  completo: boolean;
+  incidencia?: string;
+}
+
+// ─── Tareas ───────────────────────────────────────────────────────────────────
+
+export type Prioridad   = 'alta' | 'media' | 'baja';
+export type EstadoTarea = 'pendiente' | 'en_progreso' | 'completada';
+
+export interface ChecklistItem {
+  id: string;
+  texto: string;
+  completado: boolean;
+}
+
+export interface Tarea {
+  id: string;
+  titulo: string;
+  descripcion?: string;
+  asignadoA: string;
+  asignadoANombre: string;
+  asignadoPor: string;
+  fechaLimite?: string;
+  prioridad: Prioridad;
+  estado: EstadoTarea;
+  checklist: ChecklistItem[];
+  creadaEn: string;
+  completadaEn?: string;
+}
+
+// ─── Mensajería ───────────────────────────────────────────────────────────────
+
+export interface Conversacion {
+  id: string;
+  participantes: string[];
+  participantesNombres: Record<string, string>;
+  ultimoMensaje?: string;
+  ultimaFecha?: string;
+  noLeidos: Record<string, number>;
+}
+
+export interface Mensaje {
+  id: string;
+  conversacionId: string;
+  de: string;
+  para: string;
+  texto: string;
+  timestamp: string;
+  leido: boolean;
+  tareaId?: string;
 }
 
 // ─── Mesas & Pedidos ──────────────────────────────────────────────────────────
