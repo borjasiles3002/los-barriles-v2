@@ -124,6 +124,90 @@ Responde de forma concisa y directa con datos concretos. Cuando des consejos, s�
   return data.candidates?.[0]?.content?.parts?.[0]?.text ?? 'No pude generar una respuesta.';
 }
 
+// ─── Financial reports ────────────────────────────────────────────────────────
+
+const INFORME_PROMPTS: Record<string, string> = {
+  diario: `Eres el analista financiero del restaurante "Los Barriles". Genera un informe diario conciso (máximo 250 palabras) basado en estos datos reales:
+
+DATOS:
+{{datos}}
+
+El informe debe cubrir en este orden:
+1. Resumen ejecutivo (1-2 frases con los KPIs principales)
+2. Análisis de ventas: hora pico, productos estrella
+3. Situación financiera del día (beneficio, food cost estimado si hay gastos)
+4. 2-3 acciones concretas para mañana
+
+Sé directo y usa números. Sin introducciones genéricas. En español.`,
+
+  semanal: `Eres el analista financiero del restaurante "Los Barriles". Genera un informe semanal conciso (máximo 300 palabras) basado en estos datos reales:
+
+DATOS:
+{{datos}}
+
+El informe debe cubrir:
+1. Resumen de la semana (total ingresos, gastos, beneficio estimado)
+2. El mejor y peor día, con explicación breve
+3. Top 3 productos de la semana
+4. Comparativa con la semana anterior (si hay datos)
+5. Recomendaciones para la próxima semana
+
+Directo y con datos concretos. En español.`,
+
+  mensual: `Eres el analista financiero del restaurante "Los Barriles". Genera un informe mensual (máximo 400 palabras) basado en estos datos reales:
+
+DATOS:
+{{datos}}
+
+El informe debe cubrir:
+1. Resumen ejecutivo del mes
+2. Análisis de tendencias (semanas fuertes/débiles, días pico)
+3. Control de gastos por categoría (porcentaje sobre ingresos)
+4. Food cost estimado si hay datos de compras
+5. Top 5 productos del mes
+6. 3 recomendaciones estratégicas para el próximo mes
+
+Profundidad analítica real, no genérica. En español.`,
+
+  anual: `Eres el analista financiero del restaurante "Los Barriles". Genera un informe anual ejecutivo (máximo 500 palabras) basado en estos datos reales:
+
+DATOS:
+{{datos}}
+
+El informe debe cubrir:
+1. Balance anual: ingresos totales, gastos, beneficio estimado
+2. Estacionalidad: mejores y peores meses
+3. Tendencia: crecimiento o decrecimiento respecto al año
+4. Productos más rentables del año
+5. 4 objetivos estratégicos para el próximo año con métricas concretas
+
+Visión estratégica, datos reales, en español.`,
+};
+
+async function generarInforme(tipo: string, datos: unknown): Promise<string> {
+  const promptTemplate = INFORME_PROMPTS[tipo] ?? INFORME_PROMPTS['diario'];
+  const prompt = promptTemplate.replace('{{datos}}', JSON.stringify(datos, null, 2));
+
+  const body = {
+    contents: [{ parts: [{ text: prompt }] }],
+    generationConfig: { temperature: 0.4, maxOutputTokens: 2048 },
+  };
+
+  const res = await fetch(`${GEMINI_BASE}?key=${GEMINI_API_KEY}`, {
+    method:  'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body:    JSON.stringify(body),
+  });
+
+  if (!res.ok) {
+    const err = await res.text();
+    throw new Error(`Gemini API error ${res.status}: ${err}`);
+  }
+
+  const data = await res.json() as { candidates?: { content?: { parts?: { text?: string }[] } }[] };
+  return data.candidates?.[0]?.content?.parts?.[0]?.text ?? 'No se pudo generar el informe.';
+}
+
 // ─── Handler ─────────────────────────────────────────────────────────────────
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
@@ -149,6 +233,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const { messages, context } = req.body as { messages: ChatMessage[]; context: RestaurantContext };
       const reply = await chat(messages, context);
       return res.status(200).json({ reply });
+    }
+
+    if (action === 'informe') {
+      const { tipo, datos } = req.body as { tipo: string; datos: unknown };
+      const narrative = await generarInforme(tipo, datos);
+      return res.status(200).json({ narrative });
     }
 
     return res.status(400).json({ error: `Unknown action: ${action}` });

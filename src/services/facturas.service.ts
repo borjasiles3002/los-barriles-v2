@@ -5,6 +5,7 @@ import type { Factura, FacturaProducto } from '../types';
 import { updateStockFromFactura } from './stock.service';
 import { recalcularPorCambioPrecio } from './escandallos.service';
 import { findStockByName } from './stock.service';
+import { addGasto } from './gastos.service';
 
 // ─── Guardar factura + actualizar stock ───────────────────────────────────────
 
@@ -46,6 +47,17 @@ export async function procesarFactura(
   for (const { stockId, precio } of preciosCambiados) {
     await recalcularPorCambioPrecio(stockId, precio);
   }
+
+  // 5. Auto-register as expense (compras category)
+  const fechaFactura = datos.fecha || new Date().toISOString().slice(0, 10);
+  await addGasto({
+    fecha:       fechaFactura,
+    descripcion: `Factura ${datos.numero_factura || facturaRef.id} — ${datos.proveedor}`,
+    categoria:   'compras',
+    importe:     datos.total,
+    proveedor:   datos.proveedor,
+    facturaId:   facturaRef.id,
+  });
 
   return facturaRef.id;
 }

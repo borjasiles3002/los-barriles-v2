@@ -192,3 +192,69 @@ export interface ChatMessage {
   role: 'user' | 'model';
   text: string;
 }
+
+// ─── Módulo Ingresos ──────────────────────────────────────────────────────────
+
+export type MetodoPago = 'efectivo' | 'tarjeta' | 'bizum' | 'invitacion' | 'otros';
+
+export interface Ingreso {
+  id: string;
+  fecha: string;
+  hora: string;
+  mesaId: string;
+  mesaNombre: string;
+  pedidoId: string;
+  lineas: LineaPedido[];
+  subtotal: number;
+  iva: number;
+  total: number;
+  metodoPago: MetodoPago;
+  camareroId: string;
+  camareroNombre: string;
+}
+
+// ─── Módulo Gastos ────────────────────────────────────────────────────────────
+
+export type CategoriaGasto =
+  | 'compras'
+  | 'personal'
+  | 'suministros'
+  | 'alquiler'
+  | 'mantenimiento'
+  | 'marketing'
+  | 'otros';
+
+export interface Gasto {
+  id: string;
+  fecha: string;
+  descripcion: string;
+  categoria: CategoriaGasto;
+  importe: number;
+  proveedor?: string;
+  facturaId?: string;
+  createdAt: string;
+}
+
+// ─── Cierre completo ──────────────────────────────────────────────────────────
+
+export interface CierreCompleto {
+  id: string;
+  fecha: string;
+  totalIngresos: number;
+  totalGastos: number;
+  beneficioNeto: number;
+  numeroPedidos: number;
+  ticketMedio: number;
+  efectivoEsperado: number;
+  efectivoReal: number;
+  diferencia: number;
+  ingresosPorMetodo: Partial<Record<MetodoPago, number>>;
+  createdAt: string;
+}
+
+// ─── Objetivo mensual ─────────────────────────────────────────────────────────
+
+export interface Objetivo {
+  id: string;
+  ventasMensuales: number;
+}

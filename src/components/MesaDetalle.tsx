@@ -1,10 +1,11 @@
 import React, { useState } from 'react';
-import type { Mesa, Pedido, Producto, Categoria, PedidoEstado } from '../types';
+import type { Mesa, Pedido, Producto, Categoria, PedidoEstado, MetodoPago } from '../types';
 import {
   agregarProducto, quitarProducto,
   cambiarEstadoPedido, cerrarPedido,
   actualizarEstadoMesa,
 } from '../services/pedidos.service';
+import { registrarIngreso } from '../services/ingresos.service';
 import { LoadingSpinner } from './ui/LoadingSpinner';
 
 interface Props {
@@ -33,12 +34,21 @@ const ESTADO_COLORS: Record<PedidoEstado, string> = {
   cerrado:       'bg-slate-500',
 };
 
+const METODOS_PAGO: { key: MetodoPago; label: string; icon: string }[] = [
+  { key: 'efectivo',   label: 'Efectivo',   icon: '💵' },
+  { key: 'tarjeta',    label: 'Tarjeta',    icon: '💳' },
+  { key: 'bizum',      label: 'Bizum',      icon: '📱' },
+  { key: 'invitacion', label: 'Invitación', icon: '🎁' },
+  { key: 'otros',      label: 'Otros',      icon: '💰' },
+];
+
 export const MesaDetalle: React.FC<Props> = ({
   mesa, pedido, categorias, productos, onClose,
 }) => {
-  const [tab, setTab]                   = useState<Tab>('carta');
-  const [activeCat, setActiveCat]       = useState<string>(categorias[0]?.id ?? '');
+  const [tab, setTab]                     = useState<Tab>('carta');
+  const [activeCat, setActiveCat]         = useState<string>(categorias[0]?.id ?? '');
   const [loadingAction, setLoadingAction] = useState(false);
+  const [showCobroModal, setShowCobroModal] = useState(false);
 
   const elapsed = Math.floor(
     (Date.now() - new Date(pedido.createdAt).getTime()) / 60000,
@@ -70,11 +80,6 @@ export const MesaDetalle: React.FC<Props> = ({
   ) => {
     setLoadingAction(true);
     try {
-      if (nuevoEstado === 'cerrado') {
-        await cerrarPedido(pedido.id, mesa.id);
-        onClose();
-        return;
-      }
       await cambiarEstadoPedido(pedido.id, nuevoEstado);
       if (mesaEstado) {
         await actualizarEstadoMesa(mesa.id, mesaEstado, pedido.id);
@@ -87,8 +92,61 @@ export const MesaDetalle: React.FC<Props> = ({
     }
   };
 
+  const handleCobrar = async (metodo: MetodoPago) => {
+    setLoadingAction(true);
+    try {
+      await cerrarPedido(pedido.id, mesa.id);
+      await registrarIngreso(
+        pedido.id,
+        mesa.id,
+        mesa.nombre,
+        pedido.lineas,
+        pedido.total,
+        metodo,
+        pedido.camareroId    ?? '',
+        pedido.camareroNombre ?? '',
+      );
+      setShowCobroModal(false);
+      onClose();
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setLoadingAction(false);
+    }
+  };
+
   return (
     <div className="fixed inset-0 z-50 flex flex-col bg-slate-900">
+      {/* ── Modal cobro ── */}
+      {showCobroModal && (
+        <div className="fixed inset-0 z-[60] flex items-end bg-black/70 backdrop-blur-sm">
+          <div className="w-full bg-slate-800 rounded-t-2xl p-6 space-y-4">
+            <h3 className="text-white font-black text-xl text-center">Forma de pago</h3>
+            <p className="text-amber-400 font-black text-3xl text-center">{pedido.total.toFixed(2)}€</p>
+            <div className="grid grid-cols-2 gap-3">
+              {METODOS_PAGO.map(({ key, label, icon }) => (
+                <button
+                  key={key}
+                  onClick={() => handleCobrar(key)}
+                  disabled={loadingAction}
+                  className="py-4 bg-slate-700 hover:bg-amber-500 hover:text-black disabled:opacity-50 rounded-xl font-bold text-white transition-colors flex flex-col items-center gap-1"
+                >
+                  <span className="text-2xl">{icon}</span>
+                  <span>{label}</span>
+                </button>
+              ))}
+            </div>
+            <button
+              onClick={() => setShowCobroModal(false)}
+              disabled={loadingAction}
+              className="w-full py-3 text-slate-400 hover:text-white font-bold transition-colors"
+            >
+              Cancelar
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* ── Header ── */}
       <div className="bg-slate-800 border-b border-slate-700 px-4 py-3 flex items-center gap-3 shrink-0">
         <button
@@ -136,7 +194,6 @@ export const MesaDetalle: React.FC<Props> = ({
       {/* ── Carta tab ── */}
       {tab === 'carta' && (
         <div className="flex-1 flex flex-col overflow-hidden">
-          {/* Category scroll */}
           <div className="flex overflow-x-auto gap-2 px-3 py-2 shrink-0 bg-slate-800/50 border-b border-slate-700 scrollbar-hide">
             {categorias.map(cat => (
               <button
@@ -153,7 +210,6 @@ export const MesaDetalle: React.FC<Props> = ({
             ))}
           </div>
 
-          {/* Products grid */}
           <div className="flex-1 overflow-y-auto p-3 pb-6">
             {productosDeCat.length === 0 ? (
               <p className="text-slate-500 text-center mt-12">Sin productos en esta categoría</p>
@@ -256,10 +312,10 @@ export const MesaDetalle: React.FC<Props> = ({
                 </button>
               )}
 
-              {/* Cobrar */}
+              {/* Cobrar → abre modal de método de pago */}
               {(pedido.estado === 'listo' || pedido.estado === 'cuenta_pedida' || pedido.estado === 'abierto') && (
                 <button
-                  onClick={() => handleEstadoAction('cerrado')}
+                  onClick={() => setShowCobroModal(true)}
                   disabled={loadingAction || pedido.lineas.length === 0}
                   className={`py-3 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white font-black rounded-xl transition-colors flex items-center justify-center gap-2 ${
                     pedido.estado === 'abierto' ? '' : 'col-span-1'

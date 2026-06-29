@@ -8,8 +8,9 @@ export function useAlertas(onlyUnread = false) {
   const [loading, setLoading]  = useState(true);
 
   useEffect(() => {
+    // Avoid composite index: when filtering by leido, skip orderBy (different field)
     const q = onlyUnread
-      ? query(collection(db, 'alertas'), where('leido', '==', false), orderBy('createdAt', 'desc'))
+      ? query(collection(db, 'alertas'), where('leido', '==', false))
       : query(collection(db, 'alertas'), orderBy('createdAt', 'desc'));
 
     const unsub = onSnapshot(q, (snap) => {

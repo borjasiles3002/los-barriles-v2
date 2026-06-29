@@ -5,12 +5,16 @@ import { LoginView } from './components/LoginView';
 import { TPVView } from './components/TPVView';
 import { KitchenView } from './components/KitchenView';
 import { SalaView } from './components/SalaView';
-import { CajaView } from './components/CajaView';
 import { CartaView } from './components/CartaView';
 import { FacturasView } from './components/FacturasView';
 import { StockView } from './components/StockView';
 import { EscandallosView } from './components/EscandallosView';
 import { AlertasView } from './components/AlertasView';
+import { DashboardView } from './components/DashboardView';
+import { GastosView } from './components/GastosView';
+import { InformesView } from './components/InformesView';
+import { RentabilidadView } from './components/RentabilidadView';
+import { CierreView } from './components/CierreView';
 import { ChatIA } from './components/ChatIA';
 import { FullScreenLoader } from './components/ui/LoadingSpinner';
 import { Badge } from './components/ui/Badge';
@@ -19,24 +23,30 @@ import { signOut } from 'firebase/auth';
 import { auth } from './firebase';
 import type { Role } from './types';
 
-type View = 'tpv' | 'kitchen' | 'sala' | 'caja' | 'carta'
-          | 'facturas' | 'stock' | 'escandallos' | 'alertas';
+type View =
+  | 'tpv' | 'kitchen' | 'sala' | 'carta'
+  | 'dashboard' | 'informes' | 'gastos' | 'cierre'
+  | 'facturas' | 'stock' | 'escandallos' | 'rentabilidad' | 'alertas';
 
 const VIEW_LABELS: Record<View, string> = {
   tpv:          '🍺 TPV',
   kitchen:      '🍳 Cocina',
   sala:         '🪑 Sala',
-  caja:         '💰 Caja',
   carta:        '📋 Carta',
+  dashboard:    '📊 Dashboard',
+  informes:     '📈 Informes',
+  gastos:       '💸 Gastos',
+  cierre:       '💰 Cierre',
   facturas:     '🧾 Facturas',
   stock:        '📦 Stock',
-  escandallos:  '📊 Costes',
+  escandallos:  '📐 Costes',
+  rentabilidad: '🏆 Rentab.',
   alertas:      '🔔 Alertas',
 };
 
 const ROLE_VIEWS: Record<Role, View[]> = {
-  admin:    ['tpv', 'kitchen', 'sala', 'caja', 'carta', 'facturas', 'stock', 'escandallos', 'alertas'],
-  manager:  ['tpv', 'kitchen', 'sala', 'caja', 'carta', 'facturas', 'stock', 'escandallos', 'alertas'],
+  admin:    ['tpv', 'kitchen', 'sala', 'carta', 'dashboard', 'informes', 'gastos', 'cierre', 'facturas', 'stock', 'escandallos', 'rentabilidad', 'alertas'],
+  manager:  ['tpv', 'kitchen', 'sala', 'carta', 'dashboard', 'informes', 'gastos', 'cierre', 'facturas', 'stock', 'escandallos', 'rentabilidad', 'alertas'],
   camarero: ['tpv', 'sala'],
   cocinero: ['kitchen', 'stock'],
 };
@@ -48,7 +58,6 @@ const ROLE_DEFAULT: Record<Role, View> = {
   cocinero: 'kitchen',
 };
 
-// Roles that get the ChatIA floating button
 const IA_ROLES: Role[] = ['admin', 'manager'];
 
 function NavBar({
@@ -73,7 +82,7 @@ function NavBar({
           <button
             key={v}
             onClick={() => onNavigate(v)}
-            className={`relative shrink-0 flex-1 min-w-[56px] py-3 flex flex-col items-center gap-0.5 text-[10px] font-bold uppercase tracking-wide transition-colors ${
+            className={`relative shrink-0 flex-1 min-w-[52px] py-3 flex flex-col items-center gap-0.5 text-[9px] font-bold uppercase tracking-wide transition-colors ${
               currentView === v ? 'text-amber-400' : 'text-slate-500 hover:text-slate-300'
             }`}
           >
@@ -85,8 +94,8 @@ function NavBar({
           </button>
         ))}
       </div>
-      <div className="border-l border-slate-700 px-2 py-2 flex flex-col items-center gap-1 shrink-0 min-w-[56px]">
-        <span className="text-slate-400 text-[8px] uppercase font-bold max-w-[52px] truncate text-center">{userName}</span>
+      <div className="border-l border-slate-700 px-2 py-2 flex flex-col items-center gap-1 shrink-0 min-w-[52px]">
+        <span className="text-slate-400 text-[8px] uppercase font-bold max-w-[48px] truncate text-center">{userName}</span>
         <button onClick={onLogout} className="text-[9px] text-red-400 hover:text-red-300 font-bold uppercase">
           Salir
         </button>
@@ -146,15 +155,19 @@ export default function App() {
 
   return (
     <div className={showNav ? 'pb-16' : ''}>
-      {safeView === 'tpv'         && <TPVView />}
-      {safeView === 'kitchen'     && <KitchenView />}
-      {safeView === 'sala'        && <SalaView />}
-      {safeView === 'caja'        && <CajaView />}
-      {safeView === 'carta'       && <CartaView />}
-      {safeView === 'facturas'    && <FacturasView />}
-      {safeView === 'stock'       && <StockView />}
-      {safeView === 'escandallos' && <EscandallosView />}
-      {safeView === 'alertas'     && <AlertasView />}
+      {safeView === 'tpv'          && <TPVView />}
+      {safeView === 'kitchen'      && <KitchenView />}
+      {safeView === 'sala'         && <SalaView />}
+      {safeView === 'carta'        && <CartaView />}
+      {safeView === 'dashboard'    && <DashboardView />}
+      {safeView === 'informes'     && <InformesView />}
+      {safeView === 'gastos'       && <GastosView />}
+      {safeView === 'cierre'       && <CierreView />}
+      {safeView === 'facturas'     && <FacturasView />}
+      {safeView === 'stock'        && <StockView />}
+      {safeView === 'escandallos'  && <EscandallosView />}
+      {safeView === 'rentabilidad' && <RentabilidadView />}
+      {safeView === 'alertas'      && <AlertasView />}
 
       {showNav && (
         <NavBar
