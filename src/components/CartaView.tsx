@@ -5,7 +5,7 @@ import {
   addProducto, updateProducto, deleteProducto,
   toggleProductoDisponible,
 } from '../services/carta.service';
-import type { Categoria, Producto } from '../types';
+import type { Categoria, Producto, DestinoProducto } from '../types';
 import { LoadingSpinner } from './ui/LoadingSpinner';
 
 // ─── Categoria form ────────────────────────────────────────────────────────────
@@ -81,13 +81,14 @@ function ProductoForm({
   const [descripcion, setDesc]      = useState(initial?.descripcion ?? '');
   const [categoriaId, setCatId]     = useState(initial?.categoriaId ?? categorias[0]?.id ?? '');
   const [disponible, setDisponible] = useState(initial?.disponible ?? true);
+  const [destino, setDestino]       = useState<DestinoProducto>(initial?.destino ?? 'cocina');
   const [loading, setLoading]       = useState(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
     try {
-      await onSave({ nombre, precio: parseFloat(precio), descripcion, categoriaId, disponible });
+      await onSave({ nombre, precio: parseFloat(precio), descripcion, categoriaId, disponible, destino });
     } finally {
       setLoading(false);
     }
@@ -117,6 +118,15 @@ function ProductoForm({
           <label className="block text-slate-400 text-xs mb-1">Descripción (opcional)</label>
           <input value={descripcion} onChange={e => setDesc(e.target.value)}
             className="w-full bg-slate-800 border border-slate-600 text-white rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-amber-500" />
+        </div>
+        <div>
+          <label className="block text-slate-400 text-xs mb-1">Destino</label>
+          <select value={destino} onChange={e => setDestino(e.target.value as DestinoProducto)}
+            className="w-full bg-slate-800 border border-slate-600 text-white rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-amber-500">
+            <option value="cocina">🍳 Cocina — va al monitor de cocina</option>
+            <option value="barra">🍺 Barra — aparece en TPV barra</option>
+            <option value="ambos">🔀 Ambos — cocina y barra</option>
+          </select>
         </div>
         <div className="flex items-center gap-2">
           <input type="checkbox" id="disp" checked={disponible} onChange={e => setDisponible(e.target.checked)}
@@ -307,9 +317,18 @@ export const CartaView: React.FC = () => {
                             </span>
                           )}
                         </div>
-                        {prod.descripcion && (
-                          <p className="text-slate-400 text-xs truncate">{prod.descripcion}</p>
-                        )}
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          {prod.descripcion && (
+                            <p className="text-slate-400 text-xs truncate">{prod.descripcion}</p>
+                          )}
+                          <span className={`text-[10px] font-bold uppercase px-1.5 py-0.5 rounded-full ${
+                            prod.destino === 'barra' ? 'bg-blue-900/60 text-blue-400' :
+                            prod.destino === 'ambos' ? 'bg-purple-900/60 text-purple-400' :
+                            'bg-emerald-900/60 text-emerald-400'
+                          }`}>
+                            {prod.destino === 'barra' ? '🍺 Barra' : prod.destino === 'ambos' ? '🔀 Ambos' : '🍳 Cocina'}
+                          </span>
+                        </div>
                       </div>
                       <span className="text-amber-400 font-black shrink-0">{prod.precio.toFixed(2)}€</span>
                       <div className="flex gap-1.5 shrink-0">

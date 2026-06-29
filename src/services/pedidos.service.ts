@@ -3,7 +3,7 @@ import {
   runTransaction, getDocs, query, where,
 } from 'firebase/firestore';
 import { db } from '../firebase';
-import type { Pedido, LineaPedido, PedidoEstado, Producto } from '../types';
+import type { Pedido, LineaPedido, PedidoEstado, Producto, DestinoProducto } from '../types';
 
 // ─── Abrir mesa ─────────────────────────────────────────────────────────────
 
@@ -12,6 +12,7 @@ export async function abrirMesa(
   mesaNombre: string,
   camareroId: string,
   camareroNombre: string,
+  comensales = 1,
 ): Promise<string> {
   const pedidoRef = await addDoc(collection(db, 'pedidos'), {
     mesaId,
@@ -27,6 +28,7 @@ export async function abrirMesa(
   await updateDoc(doc(db, 'mesas', mesaId), {
     estado: 'ocupada',
     pedidoActivo: pedidoRef.id,
+    comensales,
   });
 
   return pedidoRef.id;
@@ -34,17 +36,23 @@ export async function abrirMesa(
 
 // ─── Añadir producto ─────────────────────────────────────────────────────────
 
-export async function agregarProducto(pedidoId: string, producto: Producto): Promise<void> {
+export async function agregarProducto(
+  pedidoId: string,
+  producto: Producto,
+  notas = '',
+): Promise<void> {
   const pedidoRef = doc(db, 'pedidos', pedidoId);
+  const destino: DestinoProducto = producto.destino ?? 'cocina';
 
   await runTransaction(db, async (t) => {
     const snap = await t.get(pedidoRef);
     if (!snap.exists()) throw new Error('Pedido no encontrado');
 
-    const data = snap.data() as Omit<Pedido, 'id'>;
+    const data   = snap.data() as Omit<Pedido, 'id'>;
     const lineas: LineaPedido[] = [...(data.lineas ?? [])];
 
-    const idx = lineas.findIndex(l => l.productoId === producto.id);
+    // Agrupar por productoId + notas (notas diferentes = líneas distintas)
+    const idx = lineas.findIndex(l => l.productoId === producto.id && (l.notas ?? '') === notas);
     if (idx >= 0) {
       lineas[idx] = { ...lineas[idx], cantidad: lineas[idx].cantidad + 1 };
     } else {
@@ -55,6 +63,8 @@ export async function agregarProducto(pedidoId: string, producto: Producto): Pro
         precio:     producto.precio,
         cantidad:   1,
         estado:     'pendiente',
+        destino,
+        notas:      notas || undefined,
       });
     }
 
@@ -99,6 +109,26 @@ export async function cambiarEstadoPedido(
   await updateDoc(doc(db, 'pedidos', pedidoId), updates);
 }
 
+// ─── Pedir cuenta ────────────────────────────────────────────────────────────
+
+export async function pedirCuenta(
+  pedidoId: string,
+  mesaId: string,
+  mesaNombre: string,
+): Promise<void> {
+  await updateDoc(doc(db, 'pedidos', pedidoId), { estado: 'cuenta_pedida' as PedidoEstado });
+  await updateDoc(doc(db, 'mesas', mesaId), { estado: 'cuenta_pedida' });
+
+  await addDoc(collection(db, 'notificaciones'), {
+    tipo:       'cuenta_pedida',
+    mesaId,
+    pedidoId,
+    mesaNombre,
+    leido:      false,
+    createdAt:  new Date().toISOString(),
+  });
+}
+
 // ─── Actualizar estado de la mesa ────────────────────────────────────────────
 
 export async function actualizarEstadoMesa(
@@ -107,6 +137,22 @@ export async function actualizarEstadoMesa(
   pedidoActivo: string | null = null,
 ): Promise<void> {
   await updateDoc(doc(db, 'mesas', mesaId), { estado, pedidoActivo });
+}
+
+// ─── Actualizar posición de mesa en el mapa sala ─────────────────────────────
+
+export async function actualizarPosicionMesa(
+  mesaId: string,
+  posX: number,
+  posY: number,
+): Promise<void> {
+  await updateDoc(doc(db, 'mesas', mesaId), { posX, posY });
+}
+
+// ─── Actualizar nombre de mesa ───────────────────────────────────────────────
+
+export async function actualizarNombreMesa(mesaId: string, nombre: string): Promise<void> {
+  await updateDoc(doc(db, 'mesas', mesaId), { nombre });
 }
 
 // ─── Cerrar pedido y liberar mesa ────────────────────────────────────────────
@@ -119,6 +165,7 @@ export async function cerrarPedido(pedidoId: string, mesaId: string): Promise<vo
   await updateDoc(doc(db, 'mesas', mesaId), {
     estado: 'libre',
     pedidoActivo: null,
+    comensales:   null,
   });
 }
 
@@ -136,20 +183,23 @@ export async function marcarLineaLista(pedidoId: string, lineaId: string): Promi
       l.id === lineaId ? { ...l, estado: 'listo' as const } : l,
     );
 
-    const todasListas = lineas.every(l => l.estado === 'listo');
+    // Notificar solo cuando TODAS las líneas de cocina (y ambos) están listas
+    const lineasCocina = lineas.filter(
+      l => l.destino === 'cocina' || l.destino === 'ambos' || !l.destino,
+    );
+    const todasCocinaListas = lineasCocina.length > 0 && lineasCocina.every(l => l.estado === 'listo');
     const updates: Record<string, unknown> = { lineas };
 
-    if (todasListas && data.estado === 'en_cocina') {
+    if (todasCocinaListas && data.estado === 'en_cocina') {
       updates['estado'] = 'listo';
-      // Create kitchen-ready notification
       const notifRef = doc(collection(db, 'notificaciones'));
       t.set(notifRef, {
-        tipo:        'pedido_listo',
-        mesaId:      data.mesaId,
+        tipo:       'pedido_listo',
+        mesaId:     data.mesaId,
         pedidoId,
-        mesaNombre:  data.mesaNombre,
-        leido:       false,
-        createdAt:   new Date().toISOString(),
+        mesaNombre: data.mesaNombre,
+        leido:      false,
+        createdAt:  new Date().toISOString(),
       });
     }
 

@@ -5,6 +5,7 @@ import { LoginView } from './components/LoginView';
 import { TPVView } from './components/TPVView';
 import { KitchenView } from './components/KitchenView';
 import { SalaView } from './components/SalaView';
+import { BarraTPVView } from './components/BarraTPVView';
 import { CartaView } from './components/CartaView';
 import { FacturasView } from './components/FacturasView';
 import { StockView } from './components/StockView';
@@ -22,6 +23,15 @@ import { useAlertas } from './hooks/useAlertas';
 import { signOut } from 'firebase/auth';
 import { auth } from './firebase';
 import type { Role } from './types';
+
+// Detecta si la URL es una ruta de monitor dedicado
+function detectRoute(): 'cocina' | 'sala' | 'barra' | null {
+  const path = window.location.pathname.toLowerCase();
+  if (path === '/cocina') return 'cocina';
+  if (path === '/sala')   return 'sala';
+  if (path === '/tpv')    return 'barra';
+  return null;
+}
 
 type View =
   | 'tpv' | 'kitchen' | 'sala' | 'carta'
@@ -61,36 +71,26 @@ const ROLE_DEFAULT: Record<Role, View> = {
 const IA_ROLES: Role[] = ['admin', 'manager'];
 
 function NavBar({
-  currentView,
-  allowedViews,
-  onNavigate,
-  userName,
-  onLogout,
-  alertasBadge,
+  currentView, allowedViews, onNavigate, userName, onLogout, alertasBadge,
 }: {
-  currentView: View;
-  allowedViews: View[];
-  onNavigate: (v: View) => void;
-  userName: string;
-  onLogout: () => void;
-  alertasBadge: number;
+  currentView:   View;
+  allowedViews:  View[];
+  onNavigate:    (v: View) => void;
+  userName:      string;
+  onLogout:      () => void;
+  alertasBadge:  number;
 }) {
   return (
     <nav className="fixed bottom-0 left-0 right-0 z-40 bg-slate-900 border-t border-slate-700 flex items-center">
       <div className="flex-1 flex overflow-x-auto scrollbar-hide">
         {allowedViews.map(v => (
-          <button
-            key={v}
-            onClick={() => onNavigate(v)}
+          <button key={v} onClick={() => onNavigate(v)}
             className={`relative shrink-0 flex-1 min-w-[52px] py-3 flex flex-col items-center gap-0.5 text-[9px] font-bold uppercase tracking-wide transition-colors ${
               currentView === v ? 'text-amber-400' : 'text-slate-500 hover:text-slate-300'
-            }`}
-          >
+            }`}>
             <span className="text-base leading-none">{VIEW_LABELS[v].split(' ')[0]}</span>
             <span className="whitespace-nowrap">{VIEW_LABELS[v].split(' ').slice(1).join(' ')}</span>
-            {v === 'alertas' && alertasBadge > 0 && (
-              <Badge count={alertasBadge} />
-            )}
+            {v === 'alertas' && alertasBadge > 0 && <Badge count={alertasBadge} />}
           </button>
         ))}
       </div>
@@ -104,7 +104,30 @@ function NavBar({
   );
 }
 
+// ─── Vistas fullscreen de monitor (sin nav) ───────────────────────────────────
+
+function MonitorView({ route }: { route: 'cocina' | 'sala' | 'barra' }) {
+  const { user, loading: authLoading } = useAuthContext();
+  if (authLoading) return <FullScreenLoader />;
+  if (!user)       return <LoginView />;
+  if (route === 'cocina') return <KitchenView />;
+  if (route === 'sala')   return <SalaView />;
+  return <BarraTPVView />;
+}
+
+// ─── App principal ────────────────────────────────────────────────────────────
+
 export default function App() {
+  const route = detectRoute();
+
+  // Rutas de monitor dedicado — sin seed, sin nav, sin chat
+  if (route) return <MonitorView route={route} />;
+
+  // Aplicación normal
+  return <MainApp />;
+}
+
+function MainApp() {
   const { user, loading: authLoading } = useAuthContext();
   const [seeding, setSeeding]           = useState(false);
   const [seedDone, setSeedDone]         = useState(false);
@@ -131,9 +154,7 @@ export default function App() {
   }, [user, seedDone]);
 
   useEffect(() => {
-    if (user && !currentView) {
-      setCurrentView(ROLE_DEFAULT[user.role]);
-    }
+    if (user && !currentView) setCurrentView(ROLE_DEFAULT[user.role]);
   }, [user, currentView]);
 
   const handleLogout = async () => {
@@ -145,8 +166,8 @@ export default function App() {
   if (authLoading || seeding) {
     return <FullScreenLoader message={seeding ? 'Iniciando datos...' : undefined} />;
   }
-  if (!user) return <LoginView />;
-  if (!currentView) return <FullScreenLoader />;
+  if (!user)         return <LoginView />;
+  if (!currentView)  return <FullScreenLoader />;
 
   const allowedViews = ROLE_VIEWS[user.role];
   const safeView: View = allowedViews.includes(currentView) ? currentView : allowedViews[0];

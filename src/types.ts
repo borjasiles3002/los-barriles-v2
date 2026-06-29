@@ -11,9 +11,10 @@ export interface AppUser {
 
 // ─── Mesas & Pedidos ──────────────────────────────────────────────────────────
 
-export type MesaEstado = 'libre' | 'ocupada' | 'cuenta_pedida';
-export type PedidoEstado = 'abierto' | 'en_cocina' | 'listo' | 'cuenta_pedida' | 'cerrado';
-export type LineaEstado = 'pendiente' | 'en_preparacion' | 'listo';
+export type MesaEstado    = 'libre' | 'ocupada' | 'cuenta_pedida';
+export type PedidoEstado  = 'abierto' | 'en_cocina' | 'listo' | 'cuenta_pedida' | 'cerrado';
+export type LineaEstado   = 'pendiente' | 'en_preparacion' | 'listo';
+export type DestinoProducto = 'barra' | 'cocina' | 'ambos';
 
 export interface Mesa {
   id: string;
@@ -21,6 +22,9 @@ export interface Mesa {
   nombre: string;
   estado: MesaEstado;
   pedidoActivo?: string | null;
+  comensales?: number;
+  posX?: number;   // 0–100 % del contenedor del mapa de sala
+  posY?: number;   // 0–100 % del contenedor del mapa de sala
 }
 
 export interface LineaPedido {
@@ -30,6 +34,7 @@ export interface LineaPedido {
   precio: number;
   cantidad: number;
   estado: LineaEstado;
+  destino: DestinoProducto;
   notas?: string;
 }
 
@@ -61,13 +66,14 @@ export interface Producto {
   precio: number;
   descripcion: string;
   disponible: boolean;
+  destino?: DestinoProducto;  // undefined → tratar como 'cocina'
 }
 
 // ─── Notificaciones & Cierres ─────────────────────────────────────────────────
 
 export interface Notificacion {
   id: string;
-  tipo: 'pedido_listo';
+  tipo: 'pedido_listo' | 'cuenta_pedida';
   mesaId: string;
   pedidoId: string;
   mesaNombre: string;
