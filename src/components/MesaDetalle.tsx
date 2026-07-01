@@ -3,7 +3,7 @@ import type { Mesa, Pedido, Producto, Categoria, PedidoEstado, MetodoPago, Clien
 import {
   agregarProducto, quitarProducto,
   cambiarEstadoPedido, cerrarPedido,
-  pedirCuenta, asignarClienteAPedido,
+  pedirCuenta, asignarClienteAPedido, actualizarNotaLinea,
 } from '../services/pedidos.service';
 import { registrarIngreso } from '../services/ingresos.service';
 import { buscarClientes, crearCliente, registrarVisitaCliente } from '../services/clientes.service';
@@ -53,7 +53,7 @@ export function MesaDetalle({ mesa, pedido, categorias, productos, onClose }: Pr
   const [loadingAction, setLoadingAction]     = useState(false);
   const [showCobroModal, setShowCobroModal]   = useState(false);
   const [emitirFacturaFlag, setEmitirFacturaFlag] = useState(false);
-  const [notaPendiente, setNotaPendiente]     = useState<string | null>(null);
+  const [editarNota, setEditarNota]           = useState<{ lineaId: string; nombre: string; notaActual: string } | null>(null);
   const [notaTexto, setNotaTexto]             = useState('');
   // Cliente
   const [showClienteModal, setShowClienteModal] = useState(false);
@@ -82,22 +82,17 @@ export function MesaDetalle({ mesa, pedido, categorias, productos, onClose }: Pr
     catch (e) { console.error(e); }
   };
 
-  const handleTapProduct = (prod: Producto) => {
-    setNotaPendiente(prod.id);
-    setNotaTexto('');
+  const handleEditarNota = (lineaId: string, nombre: string, notaActual: string) => {
+    setEditarNota({ lineaId, nombre, notaActual });
+    setNotaTexto(notaActual);
   };
 
-  const handleConfirmNota = async () => {
-    const prod = productos.find(p => p.id === notaPendiente);
-    if (!prod) return;
-    await handleAddProduct(prod, notaTexto.trim());
-    setNotaPendiente(null);
+  const handleSaveNota = async () => {
+    if (!editarNota) return;
+    try { await actualizarNotaLinea(pedido.id, editarNota.lineaId, notaTexto.trim()); }
+    catch (e) { console.error(e); }
+    setEditarNota(null);
     setNotaTexto('');
-  };
-
-  const handleAddSinNota = async (prod: Producto) => {
-    await handleAddProduct(prod, '');
-    setNotaPendiente(null);
   };
 
   const handleRemoveLinea = async (lineaId: string) => {
@@ -295,30 +290,29 @@ export function MesaDetalle({ mesa, pedido, categorias, productos, onClose }: Pr
         </div>
       )}
 
-      {/* ── Modal nota ── */}
-      {notaPendiente && (
+      {/* ── Modal editar nota (opcional, se abre desde ✏️ en la línea del pedido) ── */}
+      {editarNota && (
         <div className="fixed inset-0 z-[60] flex items-end bg-black/70 backdrop-blur-sm"
-          onClick={() => setNotaPendiente(null)}>
+          onClick={() => setEditarNota(null)}>
           <div className="w-full bg-slate-800 rounded-t-2xl p-5 space-y-3"
             onClick={e => e.stopPropagation()}>
-            <h3 className="text-white font-black text-lg">
-              {productos.find(p => p.id === notaPendiente)?.nombre}
-            </h3>
+            <h3 className="text-white font-black text-lg">Nota — {editarNota.nombre}</h3>
             <input
               autoFocus
               value={notaTexto}
               onChange={e => setNotaTexto(e.target.value)}
-              placeholder="Nota especial (sin gluten, poco hecho…)"
+              onKeyDown={e => { if (e.key === 'Enter') void handleSaveNota(); }}
+              placeholder="Sin gluten, poco hecho, sin sal…"
               className="w-full bg-slate-700 border border-slate-600 text-white rounded-xl px-4 py-3 text-base focus:outline-none focus:border-amber-500"
             />
             <div className="grid grid-cols-2 gap-3">
-              <button onClick={() => { void handleAddSinNota(productos.find(p => p.id === notaPendiente)!); }}
+              <button onClick={() => setEditarNota(null)}
                 className="py-3 bg-slate-700 hover:bg-slate-600 text-white font-bold rounded-xl">
-                Sin nota
+                Cancelar
               </button>
-              <button onClick={() => { void handleConfirmNota(); }}
+              <button onClick={() => void handleSaveNota()}
                 className="py-3 bg-amber-500 hover:bg-amber-400 text-black font-bold rounded-xl">
-                Añadir
+                Guardar nota
               </button>
             </div>
           </div>
@@ -401,7 +395,7 @@ export function MesaDetalle({ mesa, pedido, categorias, productos, onClose }: Pr
                   const agotado  = prod.controlStock && (prod.stockActual ?? 0) === 0;
                   return (
                     <button key={prod.id}
-                      onClick={() => !agotado && handleTapProduct(prod)}
+                      onClick={() => !agotado && void handleAddProduct(prod, '')}
                       disabled={agotado}
                       className={`border rounded-xl p-3 text-left transition-all flex flex-col gap-1 relative ${
                         agotado
@@ -461,6 +455,7 @@ export function MesaDetalle({ mesa, pedido, categorias, productos, onClose }: Pr
                         <LineaRow key={linea.id} linea={linea} pedidoId={pedido.id}
                           onAdd={() => handleAddProduct(productos.find(p => p.id === linea.productoId)!)}
                           onRemove={() => handleRemoveLinea(linea.id)}
+                          onEditNota={() => handleEditarNota(linea.id, linea.nombre, linea.notas ?? '')}
                           colorClass="border-blue-800/50 bg-blue-950/30" />
                       ))}
                     </ul>
@@ -476,6 +471,7 @@ export function MesaDetalle({ mesa, pedido, categorias, productos, onClose }: Pr
                         <LineaRow key={linea.id} linea={linea} pedidoId={pedido.id}
                           onAdd={() => handleAddProduct(productos.find(p => p.id === linea.productoId)!)}
                           onRemove={() => handleRemoveLinea(linea.id)}
+                          onEditNota={() => handleEditarNota(linea.id, linea.nombre, linea.notas ?? '')}
                           colorClass="border-slate-700 bg-slate-800" />
                       ))}
                     </ul>
@@ -531,17 +527,27 @@ export function MesaDetalle({ mesa, pedido, categorias, productos, onClose }: Pr
 
 // ─── Fila de línea de pedido ──────────────────────────────────────────────────
 
-function LineaRow({ linea, onAdd, onRemove, colorClass }: {
-  linea:      import('../types').LineaPedido;
-  pedidoId:   string;
-  onAdd:      () => void;
-  onRemove:   () => void;
-  colorClass: string;
+function LineaRow({ linea, onAdd, onRemove, onEditNota, colorClass }: {
+  linea:       import('../types').LineaPedido;
+  pedidoId:    string;
+  onAdd:       () => void;
+  onRemove:    () => void;
+  onEditNota:  () => void;
+  colorClass:  string;
 }) {
   return (
     <li className={`flex items-center gap-3 border rounded-xl px-3 py-2.5 ${colorClass}`}>
       <div className="flex-1 min-w-0">
-        <p className="text-white font-semibold text-sm truncate">{linea.nombre}</p>
+        <div className="flex items-center gap-1.5">
+          <p className="text-white font-semibold text-sm truncate">{linea.nombre}</p>
+          <button
+            onClick={onEditNota}
+            className="shrink-0 text-slate-500 hover:text-amber-400 active:scale-90 transition-all p-0.5"
+            title="Añadir / editar nota"
+          >
+            ✏️
+          </button>
+        </div>
         {linea.notas && (
           <p className="text-amber-400 text-xs italic font-bold">⚠ {linea.notas}</p>
         )}

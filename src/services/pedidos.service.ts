@@ -263,6 +263,21 @@ export async function marcarLineaLista(pedidoId: string, lineaId: string): Promi
   });
 }
 
+// ─── Actualizar nota de una línea ────────────────────────────────────────────
+
+export async function actualizarNotaLinea(pedidoId: string, lineaId: string, notas: string): Promise<void> {
+  const pedidoRef = doc(db, 'pedidos', pedidoId);
+  await runTransaction(db, async (t) => {
+    const snap = await t.get(pedidoRef);
+    if (!snap.exists()) return;
+    const data = snap.data() as Omit<Pedido, 'id'>;
+    const lineas = data.lineas.map(l =>
+      l.id === lineaId ? { ...l, notas: notas || undefined } : l,
+    );
+    t.update(pedidoRef, { lineas });
+  });
+}
+
 // ─── Sala: marcar línea como servida ────────────────────────────────────────
 
 export async function marcarLineaServida(pedidoId: string, lineaId: string): Promise<void> {
