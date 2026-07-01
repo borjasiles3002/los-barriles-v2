@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import type { AppUser, Role } from '../types';
+import { useState, useEffect } from 'react';
+import type { AppUser, Role, Turno } from '../types';
 import { usePersonal } from '../hooks/usePersonal';
 import {
   crearTrabajador,
@@ -7,9 +7,9 @@ import {
   desactivarTrabajador,
   activarTrabajador,
 } from '../services/personal.service';
+import { subscribeTurnosAbiertos, getAllTurnosPeriodo } from '../services/fichaje.service';
 
 const ROLES: { value: Role; label: string }[] = [
-  { value: 'gerente',  label: 'Gerente'  },
   { value: 'manager',  label: 'Manager'  },
   { value: 'camarero', label: 'Camarero' },
   { value: 'barman',   label: 'Barman'   },
@@ -40,14 +40,62 @@ const FORM_EMPTY: Form = {
   role: 'camarero', password: '', pin: '',
 };
 
+// Lunes de la semana actual
+function lunesDeSemana(): string {
+  const d = new Date();
+  const day = d.getDay();
+  const diff = d.getDate() - day + (day === 0 ? -6 : 1);
+  d.setDate(diff);
+  return d.toISOString().slice(0, 10);
+}
+
+function hoyStr(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+
 export function PersonalView() {
   const { personal, loading } = usePersonal();
-  const [modal,     setModal]     = useState<'crear' | 'editar' | null>(null);
-  const [form,      setForm]      = useState<Form>(FORM_EMPTY);
-  const [editId,    setEditId]    = useState<string>('');
-  const [guardando, setGuardando] = useState(false);
-  const [error,     setError]     = useState('');
-  const [filtro,    setFiltro]    = useState<'todos' | 'activos' | 'inactivos'>('activos');
+
+  const [modal,          setModal]          = useState<'crear' | 'editar' | null>(null);
+  const [form,           setForm]           = useState<Form>(FORM_EMPTY);
+  const [editId,         setEditId]         = useState<string>('');
+  const [guardando,      setGuardando]      = useState(false);
+  const [error,          setError]          = useState('');
+  const [filtro,         setFiltro]         = useState<'todos' | 'activos' | 'inactivos'>('activos');
+
+  // Turnos abiertos en tiempo real
+  const [turnosAbiertos, setTurnosAbiertos] = useState<Turno[]>([]);
+
+  // Horas esta semana por usuario
+  const [horasSemana,    setHorasSemana]    = useState<Record<string, number>>({});
+
+  // Modal reset PIN
+  const [resetModal,     setResetModal]     = useState<{ uid: string; nombre: string } | null>(null);
+  const [resetPin,       setResetPin]       = useState('');
+  const [resetError,     setResetError]     = useState('');
+
+  useEffect(() => {
+    const unsub = subscribeTurnosAbiertos(setTurnosAbiertos);
+    return unsub;
+  }, []);
+
+  useEffect(() => {
+    const desde = lunesDeSemana();
+    const hasta = hoyStr();
+    getAllTurnosPeriodo(desde, hasta).then(turnos => {
+      const map: Record<string, number> = {};
+      turnos.forEach(t => {
+        if (t.horasTrabajadas) {
+          map[t.usuarioId] = (map[t.usuarioId] ?? 0) + t.horasTrabajadas;
+        }
+      });
+      setHorasSemana(map);
+    }).catch(() => {});
+  }, []);
+
+  const fichados = new Set(turnosAbiertos.map(t => t.usuarioId));
+  const turnoByUser: Record<string, Turno> = {};
+  turnosAbiertos.forEach(t => { turnoByUser[t.usuarioId] = t; });
 
   const personal_filtrado = personal.filter(p => {
     if (filtro === 'activos')   return p.activo !== false;
@@ -121,17 +169,35 @@ export function PersonalView() {
     else await desactivarTrabajador(p.uid);
   };
 
+  const handleResetPin = async () => {
+    if (!resetModal) return;
+    if (!/^\d{4}$/.test(resetPin)) { setResetError('El PIN debe tener exactamente 4 dígitos.'); return; }
+    setGuardando(true);
+    setResetError('');
+    try {
+      await actualizarTrabajador(resetModal.uid, { pin: resetPin });
+      setResetModal(null);
+      setResetPin('');
+    } catch (e) {
+      setResetError(e instanceof Error ? e.message : 'Error desconocido');
+    }
+    setGuardando(false);
+  };
+
   if (loading) {
-    return (
-      <div className="flex items-center justify-center h-64 text-slate-400">Cargando personal…</div>
-    );
+    return <div className="flex items-center justify-center h-64 text-slate-400">Cargando personal…</div>;
   }
 
   return (
     <div className="max-w-4xl mx-auto p-4">
       {/* Header */}
       <div className="flex items-center justify-between mb-6">
-        <h1 className="text-2xl font-bold text-white">Personal</h1>
+        <div>
+          <h1 className="text-2xl font-bold text-white">Personal</h1>
+          <p className="text-slate-500 text-sm mt-0.5">
+            {personal_filtrado.filter(p => fichados.has(p.uid)).length} fichados ahora
+          </p>
+        </div>
         <button
           onClick={abrirCrear}
           className="px-4 py-2 rounded-lg bg-amber-500 text-white font-semibold hover:bg-amber-400 transition"
@@ -147,9 +213,7 @@ export function PersonalView() {
             key={f}
             onClick={() => setFiltro(f)}
             className={`px-3 py-1.5 rounded-lg text-sm font-medium capitalize transition ${
-              filtro === f
-                ? 'bg-amber-500 text-white'
-                : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
+              filtro === f ? 'bg-amber-500 text-white' : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
             }`}
           >
             {f}
@@ -162,60 +226,133 @@ export function PersonalView() {
         {personal_filtrado.length === 0 && (
           <p className="text-slate-400 text-center py-12">No hay trabajadores en esta vista.</p>
         )}
-        {personal_filtrado.map(p => (
-          <div
-            key={p.uid}
-            className={`bg-slate-800 rounded-xl p-4 flex items-center gap-4 ${
-              p.activo === false ? 'opacity-50' : ''
-            }`}
-          >
-            {/* Avatar */}
-            <div className="w-11 h-11 rounded-full bg-amber-600 flex items-center justify-center text-white font-bold text-lg flex-shrink-0">
-              {p.avatar ?? p.nombre[0]}
-            </div>
-            {/* Info */}
-            <div className="flex-1 min-w-0">
-              <div className="flex items-center gap-2 flex-wrap">
-                <span className="text-white font-semibold">
-                  {p.nombre} {p.apellidos}
-                </span>
-                <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${ROL_COLOR[p.role] ?? 'bg-slate-700 text-slate-300'}`}>
-                  {p.role}
-                </span>
-                {p.activo === false && (
-                  <span className="text-xs px-2 py-0.5 rounded-full bg-red-900 text-red-300">inactivo</span>
-                )}
+        {personal_filtrado.map(p => {
+          const esFichado    = fichados.has(p.uid);
+          const turno        = turnoByUser[p.uid];
+          const horaEntrada  = turno
+            ? new Date(turno.entrada).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })
+            : null;
+          const horas        = horasSemana[p.uid];
+
+          return (
+            <div
+              key={p.uid}
+              className={`bg-slate-800 rounded-xl p-4 flex items-center gap-4 border transition-all ${
+                esFichado ? 'border-emerald-700/50' : 'border-transparent'
+              } ${p.activo === false ? 'opacity-50' : ''}`}
+            >
+              {/* Avatar con punto de estado */}
+              <div className="relative shrink-0">
+                <div className="w-11 h-11 rounded-full bg-amber-600 flex items-center justify-center text-white font-bold text-lg">
+                  {p.avatar ?? p.nombre[0]}
+                </div>
+                <span className={`absolute -bottom-0.5 -right-0.5 w-3.5 h-3.5 rounded-full border-2 border-slate-800 ${
+                  esFichado ? 'bg-emerald-400' : 'bg-slate-600'
+                }`} />
               </div>
-              <p className="text-slate-400 text-sm truncate">{p.email}</p>
-              {p.telefono && <p className="text-slate-500 text-xs">{p.telefono}</p>}
+
+              {/* Info */}
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="text-white font-semibold">{p.nombre} {p.apellidos}</span>
+                  <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${ROL_COLOR[p.role] ?? 'bg-slate-700 text-slate-300'}`}>
+                    {p.role}
+                  </span>
+                  {p.activo === false && (
+                    <span className="text-xs px-2 py-0.5 rounded-full bg-red-900 text-red-300">inactivo</span>
+                  )}
+                </div>
+                <div className="flex items-center gap-3 mt-0.5 flex-wrap">
+                  <p className="text-slate-400 text-sm truncate">{p.email}</p>
+                  {esFichado ? (
+                    <span className="text-[10px] font-bold text-emerald-400 uppercase">
+                      🟢 Fichado {horaEntrada && `desde ${horaEntrada}`}
+                    </span>
+                  ) : (
+                    <span className="text-[10px] font-bold text-slate-600 uppercase">⚪ Sin fichar</span>
+                  )}
+                  {horas != null && (
+                    <span className="text-[10px] text-slate-500">
+                      {horas.toFixed(1)}h esta semana
+                    </span>
+                  )}
+                </div>
+              </div>
+
+              {/* Acciones */}
+              <div className="flex gap-2 flex-shrink-0 flex-wrap justify-end">
+                <button
+                  onClick={() => { setResetModal({ uid: p.uid, nombre: p.nombre }); setResetPin(''); setResetError(''); }}
+                  className="px-3 py-1.5 rounded-lg bg-slate-700 text-amber-400 text-sm hover:bg-slate-600 transition"
+                  title="Resetear PIN de fichaje"
+                >
+                  🔑 PIN
+                </button>
+                <button
+                  onClick={() => abrirEditar(p)}
+                  className="px-3 py-1.5 rounded-lg bg-slate-700 text-slate-300 text-sm hover:bg-slate-600 transition"
+                >
+                  Editar
+                </button>
+                <button
+                  onClick={() => void toggleActivo(p)}
+                  className={`px-3 py-1.5 rounded-lg text-sm transition ${
+                    p.activo === false
+                      ? 'bg-emerald-800 text-emerald-300 hover:bg-emerald-700'
+                      : 'bg-red-900 text-red-300 hover:bg-red-800'
+                  }`}
+                >
+                  {p.activo === false ? 'Activar' : 'Desactivar'}
+                </button>
+              </div>
             </div>
-            {/* Acciones */}
-            <div className="flex gap-2 flex-shrink-0">
+          );
+        })}
+      </div>
+
+      {/* Modal resetear PIN */}
+      {resetModal && (
+        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
+          <div className="bg-slate-800 rounded-2xl p-6 w-full max-w-xs border border-slate-700">
+            <h2 className="text-lg font-bold text-white mb-1">Resetear PIN</h2>
+            <p className="text-slate-400 text-sm mb-5">{resetModal.nombre}</p>
+            <Input
+              label="Nuevo PIN (4 dígitos)"
+              type="password"
+              inputMode="numeric"
+              maxLength={4}
+              value={resetPin}
+              onChange={v => setResetPin(v.replace(/\D/g, '').slice(0, 4))}
+            />
+            <div className="flex gap-3 justify-center mt-3">
+              {Array.from({ length: 4 }, (_, i) => (
+                <div key={i} className={`w-4 h-4 rounded-full transition-all ${i < resetPin.length ? 'bg-amber-400 scale-110' : 'bg-slate-600'}`} />
+              ))}
+            </div>
+            {resetError && <p className="text-red-400 text-sm mt-3">{resetError}</p>}
+            <div className="flex gap-3 mt-5">
               <button
-                onClick={() => abrirEditar(p)}
-                className="px-3 py-1.5 rounded-lg bg-slate-700 text-slate-300 text-sm hover:bg-slate-600 transition"
+                onClick={() => setResetModal(null)}
+                className="flex-1 py-2.5 rounded-xl bg-slate-700 text-white hover:bg-slate-600 transition"
               >
-                Editar
+                Cancelar
               </button>
               <button
-                onClick={() => void toggleActivo(p)}
-                className={`px-3 py-1.5 rounded-lg text-sm transition ${
-                  p.activo === false
-                    ? 'bg-emerald-800 text-emerald-300 hover:bg-emerald-700'
-                    : 'bg-red-900 text-red-300 hover:bg-red-800'
-                }`}
+                onClick={() => void handleResetPin()}
+                disabled={guardando || resetPin.length !== 4}
+                className="flex-1 py-2.5 rounded-xl bg-amber-500 text-white font-semibold hover:bg-amber-400 transition disabled:opacity-60"
               >
-                {p.activo === false ? 'Activar' : 'Desactivar'}
+                {guardando ? '…' : 'Guardar PIN'}
               </button>
             </div>
           </div>
-        ))}
-      </div>
+        </div>
+      )}
 
       {/* Modal crear/editar */}
       {modal && (
         <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
-          <div className="bg-slate-800 rounded-2xl p-6 w-full max-w-md">
+          <div className="bg-slate-800 rounded-2xl p-6 w-full max-w-md border border-slate-700">
             <h2 className="text-xl font-bold text-white mb-4">
               {modal === 'crear' ? 'Nuevo trabajador' : 'Editar trabajador'}
             </h2>
@@ -237,16 +374,32 @@ export function PersonalView() {
                 </select>
               </div>
               {modal === 'crear' && (
-                <Input label="Contraseña *" type="password" value={form.password} onChange={v => setForm(f => ({ ...f, password: v }))} />
+                <>
+                  <Input label="Contraseña inicial *" type="password" value={form.password} onChange={v => setForm(f => ({ ...f, password: v }))} />
+                  <div className="bg-slate-700/50 rounded-xl p-3">
+                    <p className="text-slate-400 text-xs mb-1">Entrega estas credenciales al trabajador en persona.</p>
+                    <p className="text-slate-300 text-xs">Email: <strong className="text-white">{form.email || '—'}</strong></p>
+                    <p className="text-slate-300 text-xs">Contraseña: <strong className="text-white">{form.password ? '•'.repeat(form.password.length) : '—'}</strong></p>
+                  </div>
+                </>
               )}
-              <Input
-                label={modal === 'crear' ? 'PIN 4 dígitos *' : 'Nuevo PIN (dejar vacío para no cambiar)'}
-                type="password"
-                inputMode="numeric"
-                maxLength={4}
-                value={form.pin}
-                onChange={v => setForm(f => ({ ...f, pin: v.replace(/\D/g, '').slice(0, 4) }))}
-              />
+              <div>
+                <Input
+                  label={modal === 'crear' ? 'PIN fichaje (4 dígitos) *' : 'Nuevo PIN fichaje (vacío = sin cambiar)'}
+                  type="password"
+                  inputMode="numeric"
+                  maxLength={4}
+                  value={form.pin}
+                  onChange={v => setForm(f => ({ ...f, pin: v.replace(/\D/g, '').slice(0, 4) }))}
+                />
+                {form.pin && (
+                  <div className="flex gap-2 mt-2 justify-center">
+                    {Array.from({ length: 4 }, (_, i) => (
+                      <div key={i} className={`w-3 h-3 rounded-full transition-all ${i < form.pin.length ? 'bg-amber-400' : 'bg-slate-600'}`} />
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
             {error && <p className="text-red-400 text-sm mt-3">{error}</p>}
             <div className="flex gap-3 mt-5">
@@ -292,7 +445,7 @@ function Input({
         disabled={disabled}
         inputMode={inputMode}
         maxLength={maxLength}
-        className="w-full bg-slate-700 text-white rounded-lg px-3 py-2 text-sm disabled:opacity-50"
+        className="w-full bg-slate-700 text-white rounded-lg px-3 py-2 text-sm disabled:opacity-50 focus:outline-none focus:ring-1 focus:ring-amber-500"
       />
     </div>
   );

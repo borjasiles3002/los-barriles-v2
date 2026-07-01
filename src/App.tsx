@@ -33,16 +33,17 @@ import { useTotalNoLeidos } from './hooks/useMensajes';
 import { useTareasPendientesCount } from './hooks/useTareas';
 import { signOut } from 'firebase/auth';
 import { auth } from './firebase';
+import { getTurnoAbierto, registrarEntrada } from './services/fichaje.service';
 import type { AppUser, Role } from './types';
 
 // ─── Routing ──────────────────────────────────────────────────────────────────
 
 function detectRoute(): 'cocina' | 'sala' | 'barra' | 'fichaje' | null {
   const path = window.location.pathname.toLowerCase();
-  if (path === '/cocina')   return 'cocina';
-  if (path === '/sala')     return 'sala';
-  if (path === '/tpv')      return 'barra';
-  if (path === '/fichaje')  return 'fichaje';
+  if (path === '/cocina')                        return 'cocina';
+  if (path === '/sala')                          return 'sala';
+  if (path === '/tpv')                           return 'barra';
+  if (path === '/fichaje' || path === '/fichar') return 'fichaje';
   return null;
 }
 
@@ -95,9 +96,9 @@ const ROLE_VIEWS: Record<Role, View[]> = {
 };
 
 const ROLE_DEFAULT: Record<Role, View> = {
-  gerente:  'tpv',
-  admin:    'tpv',
-  manager:  'tpv',
+  gerente:  'dashboard',
+  admin:    'dashboard',
+  manager:  'dashboard',
   camarero: 'tpv',
   barman:   'tpv',
   cocinero: 'kitchen',
@@ -146,15 +147,83 @@ function NavBar({
   );
 }
 
-// ─── Monitor / Fichaje views (fullscreen, requieren auth) ─────────────────────
+// ─── Fichaje gate (post-login, solo trabajadores sin turno abierto) ───────────
 
-function MonitorView({ route }: { route: 'cocina' | 'sala' | 'barra' | 'fichaje' }) {
+const WORKER_ROLES: Role[] = ['camarero', 'cocinero', 'barman'];
+
+function FichajeGate({ user, onDone }: { user: AppUser; onDone: () => void }) {
+  const [loading, setLoading] = useState(false);
+  const [done,    setDone]    = useState(false);
+  const [hora,    setHora]    = useState('');
+
+  useEffect(() => {
+    const tick = () => setHora(
+      new Date().toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' }),
+    );
+    tick();
+    const id = setInterval(tick, 10000);
+    return () => clearInterval(id);
+  }, []);
+
+  const handleFichar = async () => {
+    setLoading(true);
+    try {
+      await registrarEntrada(user.uid, user.nombre);
+      setDone(true);
+      setTimeout(onDone, 2500);
+    } catch (e) {
+      console.error(e);
+      setLoading(false);
+    }
+  };
+
+  if (done) return (
+    <div className="min-h-screen bg-slate-900 flex flex-col items-center justify-center gap-4">
+      <div className="text-7xl">✅</div>
+      <p className="text-white text-2xl font-black">¡Bienvenido, {user.nombre}!</p>
+      <p className="text-emerald-400 text-lg">Entrada registrada a las {hora}</p>
+    </div>
+  );
+
+  return (
+    <div className="min-h-screen bg-slate-900 flex flex-col items-center justify-center p-6">
+      <div className="text-center mb-8">
+        <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-amber-500 mb-3">
+          <span className="text-3xl">🍺</span>
+        </div>
+        <h1 className="text-2xl font-black text-white uppercase tracking-widest">Los Barriles</h1>
+        <p className="text-slate-400 mt-1 text-xl font-mono font-bold">{hora}</p>
+      </div>
+
+      <div className="bg-slate-800 rounded-2xl p-8 w-full max-w-sm text-center border border-slate-700 shadow-2xl">
+        <p className="text-slate-400 text-sm mb-1">Hola, <span className="text-white font-bold">{user.nombre}</span></p>
+        <p className="text-slate-500 text-sm mb-8">Aún no has fichado hoy</p>
+        <button
+          onClick={() => void handleFichar()}
+          disabled={loading}
+          className="w-full py-8 bg-emerald-600 hover:bg-emerald-500 active:scale-95 disabled:opacity-60 text-white text-2xl font-black rounded-2xl transition-all uppercase tracking-wide shadow-lg"
+        >
+          {loading ? '…' : '⏰ Fichar entrada'}
+        </button>
+        <button
+          onClick={onDone}
+          className="mt-4 text-slate-600 hover:text-slate-400 text-sm font-bold transition-colors w-full py-2"
+        >
+          Continuar sin fichar →
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ─── Monitor views (fullscreen, requieren auth excepto fichaje) ───────────────
+
+function MonitorView({ route }: { route: 'cocina' | 'sala' | 'barra' }) {
   const { user, loading: authLoading } = useAuthContext();
   if (authLoading) return <FullScreenLoader />;
   if (!user)       return <LoginView />;
-  if (route === 'cocina')   return <KitchenView />;
-  if (route === 'sala')     return <SalaView />;
-  if (route === 'fichaje')  return <FichajeScreen />;
+  if (route === 'cocina') return <KitchenView />;
+  if (route === 'sala')   return <SalaView />;
   return <BarraTPVView />;
 }
 
@@ -162,6 +231,7 @@ function MonitorView({ route }: { route: 'cocina' | 'sala' | 'barra' | 'fichaje'
 
 export default function App() {
   const route = detectRoute();
+  if (route === 'fichaje') return <FichajeScreen />;  // sin auth — tablet pública
   if (route) return <MonitorView route={route} />;
   return <MainApp />;
 }
@@ -170,10 +240,12 @@ export default function App() {
 
 function MainApp() {
   const { user, loading: authLoading } = useAuthContext();
-  const [seeding,     setSeeding]     = useState(false);
-  const [seedDone,    setSeedDone]    = useState(false);
-  const [currentView, setCurrentView] = useState<View | null>(null);
-  const [localUser,   setLocalUser]   = useState<AppUser | null>(null);
+  const [seeding,            setSeeding]            = useState(false);
+  const [seedDone,           setSeedDone]           = useState(false);
+  const [currentView,        setCurrentView]        = useState<View | null>(null);
+  const [localUser,          setLocalUser]          = useState<AppUser | null>(null);
+  const [fichajeGateChecked, setFichajeGateChecked] = useState(false);
+  const [showFichajeGate,    setShowFichajeGate]    = useState(false);
 
   const { alertas }     = useAlertas(true);
   const alertasBadge    = alertas.length;
@@ -206,10 +278,27 @@ function MainApp() {
     if (user && !currentView) setCurrentView(ROLE_DEFAULT[user.role]);
   }, [user, currentView]);
 
+  // Mostrar gate de fichaje al hacer login si el trabajador no tiene turno abierto
+  useEffect(() => {
+    if (!user || fichajeGateChecked) return;
+    if (!WORKER_ROLES.includes(user.role)) {
+      setFichajeGateChecked(true);
+      return;
+    }
+    getTurnoAbierto(user.uid)
+      .then(turno => {
+        setShowFichajeGate(turno === null);
+        setFichajeGateChecked(true);
+      })
+      .catch(() => setFichajeGateChecked(true));
+  }, [user, fichajeGateChecked]);
+
   const handleLogout = async () => {
     try { await signOut(auth); } catch (e) { console.error(e); }
     setCurrentView(null);
     setSeedDone(false);
+    setFichajeGateChecked(false);
+    setShowFichajeGate(false);
   };
 
   if (authLoading || seeding) {
@@ -217,6 +306,11 @@ function MainApp() {
   }
   if (!user)        return <LoginView />;
   if (!currentView) return <FullScreenLoader />;
+
+  // Gate de fichaje para trabajadores sin turno abierto
+  if (showFichajeGate && fichajeGateChecked) {
+    return <FichajeGate user={user} onDone={() => setShowFichajeGate(false)} />;
+  }
 
   const allowedViews = ROLE_VIEWS[user.role] ?? ROLE_VIEWS['camarero'];
   const safeView: View = allowedViews.includes(currentView) ? currentView : allowedViews[0];
