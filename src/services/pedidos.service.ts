@@ -1,5 +1,5 @@
 import {
-  collection, doc, addDoc, updateDoc,
+  collection, doc, addDoc, updateDoc, deleteDoc,
   runTransaction, getDocs, query, where,
 } from 'firebase/firestore';
 import { db } from '../firebase';
@@ -243,7 +243,7 @@ export async function marcarLineaLista(pedidoId: string, lineaId: string): Promi
     const lineasCocina = lineas.filter(
       l => l.destino === 'cocina' || l.destino === 'ambos' || !l.destino,
     );
-    const todasCocinaListas = lineasCocina.length > 0 && lineasCocina.every(l => l.estado === 'listo');
+    const todasCocinaListas = lineasCocina.length > 0 && lineasCocina.every(l => l.estado === 'listo' || l.estado === 'servido');
     const updates: Record<string, unknown> = { lineas };
 
     if (todasCocinaListas && data.estado === 'en_cocina') {
@@ -261,6 +261,27 @@ export async function marcarLineaLista(pedidoId: string, lineaId: string): Promi
 
     t.update(pedidoRef, updates);
   });
+}
+
+// ─── Sala: marcar línea como servida ────────────────────────────────────────
+
+export async function marcarLineaServida(pedidoId: string, lineaId: string): Promise<void> {
+  const pedidoRef = doc(db, 'pedidos', pedidoId);
+  await runTransaction(db, async (t) => {
+    const snap = await t.get(pedidoRef);
+    if (!snap.exists()) return;
+    const data = snap.data() as Omit<Pedido, 'id'>;
+    const lineas = data.lineas.map(l =>
+      l.id === lineaId ? { ...l, estado: 'servido' as const } : l,
+    );
+    t.update(pedidoRef, { lineas });
+  });
+}
+
+// ─── Eliminar mesa ────────────────────────────────────────────────────────────
+
+export async function eliminarMesa(mesaId: string): Promise<void> {
+  await deleteDoc(doc(db, 'mesas', mesaId));
 }
 
 // ─── Marcar notificación como leída ──────────────────────────────────────────

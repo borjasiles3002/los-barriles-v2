@@ -104,7 +104,7 @@ export interface Mensaje {
 
 export type MesaEstado    = 'libre' | 'ocupada' | 'cuenta_pedida';
 export type PedidoEstado  = 'abierto' | 'en_cocina' | 'listo' | 'cuenta_pedida' | 'cerrado';
-export type LineaEstado   = 'pendiente' | 'en_preparacion' | 'listo';
+export type LineaEstado   = 'pendiente' | 'en_preparacion' | 'listo' | 'servido';
 export type DestinoProducto = 'barra' | 'cocina' | 'ambos';
 export type TipoIva = 'reducido' | 'superreducido' | 'normal';
 

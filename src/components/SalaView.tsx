@@ -1,12 +1,15 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useMesas } from '../hooks/useMesas';
 import { usePedidos } from '../hooks/usePedidos';
-import { actualizarPosicionMesa, actualizarNombreMesa } from '../services/pedidos.service';
-import { addDoc, collection } from 'firebase/firestore';
+import {
+  actualizarPosicionMesa, actualizarNombreMesa,
+  pedirCuenta, marcarLineaServida, eliminarMesa,
+} from '../services/pedidos.service';
+import { addDoc, collection, onSnapshot, doc } from 'firebase/firestore';
 import { db } from '../firebase';
 import { useAuthContext } from '../contexts/AuthContext';
 import { FullScreenLoader } from './ui/LoadingSpinner';
-import type { Mesa, Pedido } from '../types';
+import type { Mesa, Pedido, LineaPedido } from '../types';
 
 // ─── Reloj ────────────────────────────────────────────────────────────────────
 
@@ -26,13 +29,13 @@ function Clock() {
 
 // ─── Colores por estado ───────────────────────────────────────────────────────
 
-function mesaStyle(mesa: Mesa, pedido: Pedido | undefined, editMode: boolean) {
+function mesaStyle(mesa: Mesa, pedido: Pedido | undefined) {
   const elapsed = pedido
     ? Math.floor((Date.now() - new Date(pedido.createdAt).getTime()) / 60000)
     : 0;
 
   const hasBebidas = pedido?.lineas.some(
-    l => (l.destino === 'barra' || l.destino === 'ambos') && l.estado !== 'listo',
+    l => (l.destino === 'barra' || l.destino === 'ambos') && l.estado !== 'listo' && l.estado !== 'servido',
   ) ?? false;
 
   if (mesa.estado === 'libre')
@@ -46,20 +49,172 @@ function mesaStyle(mesa: Mesa, pedido: Pedido | undefined, editMode: boolean) {
   if (elapsed > 30)
     return { border: 'border-red-400', bg: 'bg-red-900/20', dot: 'bg-red-400 animate-pulse', label: `${elapsed}m ⚠`, labelColor: 'text-red-300' };
   return { border: 'border-amber-500', bg: 'bg-amber-900/20', dot: 'bg-amber-400 animate-pulse', label: pedido?.estado === 'en_cocina' ? '🍳 Cocina' : 'Ocupada', labelColor: 'text-amber-300' };
+}
 
-  void editMode;
+// ─── Panel detalle pedido ─────────────────────────────────────────────────────
+
+function lineaEstadoStyle(linea: LineaPedido) {
+  if (linea.estado === 'servido')
+    return { row: 'opacity-40', name: 'line-through text-slate-500', badge: 'bg-slate-600', icon: '' };
+  if (linea.estado === 'listo')
+    return { row: '', name: 'text-emerald-300 font-bold', badge: 'bg-emerald-700', icon: '✓ ' };
+  if (linea.estado === 'en_preparacion')
+    return { row: '', name: 'text-amber-300', badge: 'bg-amber-700', icon: '⏳ ' };
+  return { row: '', name: 'text-white', badge: 'bg-slate-700', icon: '' };
+}
+
+function PedidoDetailPanel({ mesa, onClose }: { mesa: Mesa; onClose: () => void }) {
+  const [pedido, setPedido] = useState<Pedido | null>(null);
+  const [now, setNow]       = useState(Date.now());
+
+  useEffect(() => {
+    if (!mesa.pedidoActivo) return;
+    const unsub = onSnapshot(doc(db, 'pedidos', mesa.pedidoActivo), (snap) => {
+      setPedido(snap.exists() ? ({ id: snap.id, ...snap.data() } as Pedido) : null);
+    });
+    return unsub;
+  }, [mesa.pedidoActivo]);
+
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 30000);
+    return () => clearInterval(id);
+  }, []);
+
+  const elapsed = pedido
+    ? Math.floor((now - new Date(pedido.createdAt).getTime()) / 60000)
+    : 0;
+
+  const handleServido = async (lineaId: string) => {
+    if (!pedido) return;
+    try { await marcarLineaServida(pedido.id, lineaId); }
+    catch (e) { console.error(e); }
+  };
+
+  const handlePedirCuenta = async () => {
+    if (!pedido) return;
+    try { await pedirCuenta(pedido.id, mesa.id, mesa.nombre); }
+    catch (e) { console.error(e); }
+  };
+
+  return (
+    <>
+      {/* Overlay */}
+      <div
+        className="fixed inset-0 bg-black/50 z-40"
+        onClick={onClose}
+      />
+
+      {/* Panel */}
+      <div className="fixed inset-y-0 right-0 w-80 md:w-96 bg-slate-900 border-l border-slate-700 z-50 flex flex-col shadow-2xl">
+        {/* Header */}
+        <div className="p-4 border-b border-slate-700 bg-slate-800 flex justify-between items-start">
+          <div>
+            <h2 className="text-white font-black text-xl">{mesa.nombre}</h2>
+            {mesa.comensales != null && mesa.comensales > 0 && (
+              <p className="text-slate-400 text-sm">{mesa.comensales} comensales</p>
+            )}
+            {mesa.estado === 'libre' ? (
+              <p className="text-slate-500 text-sm mt-1">Mesa libre</p>
+            ) : (
+              <p className="text-amber-400 text-sm font-bold mt-1">{elapsed} min abierta</p>
+            )}
+          </div>
+          <button
+            onClick={onClose}
+            className="text-slate-400 hover:text-white text-xl font-bold p-1 rounded-lg hover:bg-slate-700 transition-colors shrink-0 ml-2"
+          >
+            ✕
+          </button>
+        </div>
+
+        {mesa.estado === 'libre' ? (
+          <div className="flex-1 flex flex-col items-center justify-center gap-3 text-slate-500">
+            <span className="text-4xl">🪑</span>
+            <p className="text-lg font-bold">Mesa libre</p>
+            <p className="text-sm text-center px-4">Abre la mesa desde el TPV para comenzar un pedido</p>
+          </div>
+        ) : (
+          <>
+            {/* Líneas del pedido */}
+            <div className="flex-1 overflow-y-auto p-3 space-y-2">
+              {!pedido ? (
+                <p className="text-slate-500 text-center py-8">Cargando pedido...</p>
+              ) : pedido.lineas.length === 0 ? (
+                <p className="text-slate-500 text-center py-8">Sin productos</p>
+              ) : (
+                pedido.lineas.map(linea => {
+                  const st = lineaEstadoStyle(linea);
+                  return (
+                    <div
+                      key={linea.id}
+                      className={`flex items-center gap-2 p-3 rounded-xl bg-slate-800 border border-slate-700 transition-all ${st.row}`}
+                    >
+                      <span className={`text-xs font-black px-2 py-1 rounded-lg min-w-[2rem] text-center text-white shrink-0 ${st.badge}`}>
+                        {linea.cantidad}×
+                      </span>
+                      <div className="flex-1 min-w-0">
+                        <p className={`text-sm leading-tight ${st.name}`}>
+                          {st.icon}{linea.nombre}
+                        </p>
+                        {linea.notas && (
+                          <p className="text-amber-400 text-xs italic mt-0.5">⚠ {linea.notas}</p>
+                        )}
+                      </div>
+                      <div className="text-right shrink-0 flex flex-col items-end gap-1">
+                        <p className="text-slate-400 text-xs">{(linea.precio * linea.cantidad).toFixed(2)}€</p>
+                        {linea.estado === 'listo' && (
+                          <button
+                            onClick={() => handleServido(linea.id)}
+                            className="text-[10px] px-2 py-0.5 bg-emerald-600 hover:bg-emerald-500 active:scale-95 text-white rounded-lg font-bold transition-all"
+                          >
+                            Servido
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+
+            {/* Footer */}
+            <div className="p-4 border-t border-slate-700 bg-slate-800/50 space-y-3">
+              <div className="flex justify-between items-center">
+                <span className="text-slate-400 font-bold uppercase text-sm">Total</span>
+                <span className="text-white font-black text-xl">{pedido?.total?.toFixed(2) ?? '0.00'}€</span>
+              </div>
+              {pedido?.estado === 'cuenta_pedida' ? (
+                <div className="w-full py-3 bg-red-900/40 border border-red-600 text-red-300 font-bold text-center rounded-xl text-sm">
+                  💳 Cuenta pedida
+                </div>
+              ) : (
+                <button
+                  onClick={handlePedirCuenta}
+                  className="w-full py-3 bg-red-600 hover:bg-red-500 active:scale-95 text-white font-black rounded-xl transition-all"
+                >
+                  💳 Pedir cuenta
+                </button>
+              )}
+            </div>
+          </>
+        )}
+      </div>
+    </>
+  );
 }
 
 // ─── Tarjeta de mesa ──────────────────────────────────────────────────────────
 
 function MesaCard({
-  mesa, pedido, editMode, onRename,
+  mesa, pedido, editMode, onRename, onDelete, onClick,
   onPointerDown,
 }: {
   mesa: Mesa;
   pedido?: Pedido;
   editMode: boolean;
   onRename: (id: string, nombre: string) => void;
+  onDelete: (id: string) => void;
+  onClick: (mesa: Mesa) => void;
   onPointerDown: (e: React.PointerEvent, mesaId: string) => void;
 }) {
   const [renaming, setRenaming] = useState(false);
@@ -68,7 +223,7 @@ function MesaCard({
     ? Math.floor((Date.now() - new Date(pedido.createdAt).getTime()) / 60000)
     : null;
 
-  const st = mesaStyle(mesa, pedido, editMode);
+  const st = mesaStyle(mesa, pedido);
 
   const handleRename = () => {
     if (draftName.trim() && draftName !== mesa.nombre) {
@@ -79,10 +234,23 @@ function MesaCard({
 
   return (
     <div
-      className={`relative rounded-2xl border-2 p-3 flex flex-col gap-1.5 select-none transition-colors ${st.bg} ${st.border} ${editMode ? 'cursor-grab active:cursor-grabbing shadow-2xl' : ''}`}
+      className={`relative rounded-2xl border-2 p-3 flex flex-col gap-1.5 select-none transition-colors ${st.bg} ${st.border} ${editMode ? 'cursor-grab active:cursor-grabbing shadow-2xl' : 'cursor-pointer hover:opacity-90'}`}
       style={{ minWidth: 96, minHeight: 80 }}
       onPointerDown={editMode ? e => onPointerDown(e, mesa.id) : undefined}
+      onClick={!editMode ? () => onClick(mesa) : undefined}
     >
+      {/* Botón eliminar (solo en modo edición) */}
+      {editMode && (
+        <button
+          onClick={(e) => { e.stopPropagation(); onDelete(mesa.id); }}
+          onPointerDown={(e) => e.stopPropagation()}
+          className="absolute -top-2 -right-2 w-5 h-5 bg-red-600 hover:bg-red-500 text-white text-[10px] font-black rounded-full flex items-center justify-center shadow-lg z-10 transition-colors"
+          title={`Eliminar ${mesa.nombre}`}
+        >
+          ✕
+        </button>
+      )}
+
       {editMode && renaming ? (
         <input
           autoFocus
@@ -109,7 +277,9 @@ function MesaCard({
       {elapsed !== null && mesa.estado !== 'libre' && (
         <span className="text-xs font-mono text-slate-400">{elapsed}m · {pedido?.total?.toFixed(2) ?? '0.00'}€</span>
       )}
-      {mesa.comensales && <span className="text-[10px] text-slate-500">{mesa.comensales} com.</span>}
+      {mesa.comensales != null && mesa.comensales > 0 && (
+        <span className="text-[10px] text-slate-500">{mesa.comensales} com.</span>
+      )}
     </div>
   );
 }
@@ -123,6 +293,7 @@ export function SalaView() {
   const [editMode, setEditMode]           = useState(false);
   const [positions, setPositions]         = useState<Record<string, { x: number; y: number }>>({});
   const [draggingId, setDraggingId]       = useState<string | null>(null);
+  const [selectedMesaId, setSelectedMesaId] = useState<string | null>(null);
   const containerRef                      = useRef<HTMLDivElement>(null);
   const dragOffset                        = useRef({ dx: 0, dy: 0 });
 
@@ -131,6 +302,9 @@ export function SalaView() {
 
   const pedidoByMesa: Record<string, Pedido> = {};
   pedidos.forEach(p => { pedidoByMesa[p.mesaId] = p; });
+
+  // Mesa seleccionada siempre sincronizada con datos en vivo
+  const selectedMesa = selectedMesaId ? (mesas.find(m => m.id === selectedMesaId) ?? null) : null;
 
   // Inicializar posiciones desde Firestore
   useEffect(() => {
@@ -199,6 +373,18 @@ export function SalaView() {
     } catch (e) { console.error(e); }
   };
 
+  const handleDeleteMesa = async (mesaId: string) => {
+    const mesa = mesas.find(m => m.id === mesaId);
+    if (!mesa) return;
+    if (mesa.estado !== 'libre') {
+      alert(`${mesa.nombre} tiene un pedido activo. Cierra el pedido antes de eliminarla.`);
+      return;
+    }
+    if (!window.confirm(`¿Eliminar ${mesa.nombre}?`)) return;
+    try { await eliminarMesa(mesaId); }
+    catch (e) { console.error(e); }
+  };
+
   // ── Stats ─────────────────────────────────────────────────────────────────
   const libres   = mesas.filter(m => m.estado === 'libre').length;
   const ocupadas = mesas.filter(m => m.estado === 'ocupada').length;
@@ -236,7 +422,7 @@ export function SalaView() {
                 {editMode && (
                   <button onClick={handleAddMesa}
                     className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold rounded-xl">
-                    + Mesa
+                    ＋ Mesa
                   </button>
                 )}
                 <button
@@ -252,10 +438,10 @@ export function SalaView() {
         </div>
       </div>
 
-      {/* Leyenda */}
+      {/* Leyenda modo edición */}
       {editMode && (
         <div className="shrink-0 bg-amber-900/30 border-b border-amber-700/50 px-4 py-1.5 text-xs text-amber-300 font-bold text-center">
-          Modo edición — Arrastra las mesas · Doble clic en el nombre para renombrar
+          Modo edición — Arrastra las mesas · Doble clic para renombrar · ✕ para eliminar
         </div>
       )}
 
@@ -286,12 +472,22 @@ export function SalaView() {
                 pedido={pedidoByMesa[mesa.id]}
                 editMode={editMode}
                 onRename={handleRename}
+                onDelete={handleDeleteMesa}
+                onClick={(m) => setSelectedMesaId(m.id)}
                 onPointerDown={handlePointerDown}
               />
             </div>
           );
         })}
       </div>
+
+      {/* Panel detalle pedido */}
+      {selectedMesa && (
+        <PedidoDetailPanel
+          mesa={selectedMesa}
+          onClose={() => setSelectedMesaId(null)}
+        />
+      )}
     </div>
   );
 }

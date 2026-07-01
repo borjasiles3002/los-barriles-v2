@@ -37,15 +37,15 @@ const MESAS = [
 // ─── CATEGORÍAS ───────────────────────────────────────────────────────────────
 
 const CATEGORIAS = [
-  { nombre: 'Entrantes',  orden: 1 },
-  { nombre: 'Ensaladas',  orden: 2 },
-  { nombre: 'Carnes',     orden: 3 },
-  { nombre: 'Pescados',   orden: 4 },
-  { nombre: 'Arroces',    orden: 5 },
-  { nombre: 'Postres',    orden: 6 },
-  { nombre: 'Bebidas',    orden: 7 },
-  { nombre: 'Cervezas',   orden: 8 },
-  { nombre: 'Vinos',      orden: 9 },
+  { nombre: 'Entrantes',  orden: 1, destino: 'cocina' },
+  { nombre: 'Ensaladas',  orden: 2, destino: 'cocina' },
+  { nombre: 'Carnes',     orden: 3, destino: 'cocina' },
+  { nombre: 'Pescados',   orden: 4, destino: 'cocina' },
+  { nombre: 'Arroces',    orden: 5, destino: 'cocina' },
+  { nombre: 'Postres',    orden: 6, destino: 'cocina' },
+  { nombre: 'Bebidas',    orden: 7, destino: 'barra'  },
+  { nombre: 'Cervezas',   orden: 8, destino: 'barra'  },
+  { nombre: 'Vinos',      orden: 9, destino: 'barra'  },
 ];
 
 // ─── PRODUCTOS (por nombre de categoría) ─────────────────────────────────────
@@ -150,6 +150,7 @@ async function main() {
           precio:       p.precio,
           descripcion:  p.descripcion,
           disponible:   true,
+          destino:      cat.destino,
         });
       }
       await batch.commit();

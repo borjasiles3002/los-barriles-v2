@@ -5,9 +5,13 @@ import { playComandaNueva, playCocinaLista } from '../utils/sounds';
 import { FullScreenLoader } from './ui/LoadingSpinner';
 import type { Pedido, LineaPedido } from '../types';
 
-// Solo líneas que van a cocina (cocina | ambos | undefined = default cocina)
+// Solo líneas que van a cocina. Destino barra nunca aparece aquí.
 function esCocina(l: LineaPedido) {
-  return !l.destino || l.destino === 'cocina' || l.destino === 'ambos';
+  if (!l.destino) {
+    console.warn('[Cocina] Línea sin destino definido, tratada como cocina:', l.nombre);
+    return true;
+  }
+  return l.destino === 'cocina' || l.destino === 'ambos';
 }
 
 function tiempoColor(min: number) {
@@ -39,8 +43,8 @@ function OrderCard({ pedido }: { pedido: Pedido }) {
     ? { card: 'border-emerald-400 bg-emerald-950/40', header: 'bg-emerald-900/50 border-emerald-700', time: 'text-emerald-400' }
     : tiempoColor(elapsed);
 
-  const pendientes = lineasCocina.filter(l => l.estado !== 'listo').length;
-  const allReady   = lineasCocina.every(l => l.estado === 'listo');
+  const pendientes = lineasCocina.filter(l => l.estado !== 'listo' && l.estado !== 'servido').length;
+  const allReady   = lineasCocina.every(l => l.estado === 'listo' || l.estado === 'servido');
 
   const handleMarkLine = async (lineaId: string) => {
     try { await marcarLineaLista(pedido.id, lineaId); }
@@ -77,25 +81,25 @@ function OrderCard({ pedido }: { pedido: Pedido }) {
         {lineasCocina.map(linea => (
           <div key={linea.id}
             className={`flex items-center gap-3 rounded-xl p-3 border transition-all ${
-              linea.estado === 'listo'
+              linea.estado === 'listo' || linea.estado === 'servido'
                 ? 'bg-slate-800/30 border-slate-700 opacity-50'
                 : 'bg-slate-800 border-slate-600'
             }`}
           >
             <span className={`font-black text-sm px-2.5 py-1 rounded-lg min-w-[2rem] text-center ${
-              linea.estado === 'listo' ? 'bg-emerald-600 text-white' : 'bg-red-700 text-white'
+              linea.estado === 'listo' || linea.estado === 'servido' ? 'bg-emerald-600 text-white' : 'bg-red-700 text-white'
             }`}>
               {linea.cantidad}×
             </span>
             <div className="flex-1 min-w-0">
-              <p className={`font-bold text-sm leading-tight ${linea.estado === 'listo' ? 'line-through text-slate-500' : 'text-white'}`}>
+              <p className={`font-bold text-sm leading-tight ${linea.estado === 'listo' || linea.estado === 'servido' ? 'line-through text-slate-500' : 'text-white'}`}>
                 {linea.nombre}
               </p>
               {linea.notas && (
                 <p className="text-amber-400 text-xs font-bold mt-0.5 italic">⚠ {linea.notas}</p>
               )}
             </div>
-            {linea.estado !== 'listo' && pedido.estado !== 'listo' && (
+            {linea.estado !== 'listo' && linea.estado !== 'servido' && pedido.estado !== 'listo' && (
               <button
                 onClick={() => handleMarkLine(linea.id)}
                 className="shrink-0 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 active:scale-95 text-white text-xs font-black rounded-xl transition-all"

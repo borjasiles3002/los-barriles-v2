@@ -23,46 +23,46 @@ const CATEGORIAS = [
 ];
 
 const PRODUCTOS = [
-  // Entrantes
-  { categoriaId: 'entrantes', nombre: 'Pan con tomate',      precio: 3.50,  descripcion: 'Pan artesano con tomate natural y aceite de oliva', disponible: true },
-  { categoriaId: 'entrantes', nombre: 'Jamón ibérico',       precio: 14.00, descripcion: 'Jamón ibérico de bellota, cortado a mano',          disponible: true },
-  { categoriaId: 'entrantes', nombre: 'Tabla de quesos',     precio: 11.00, descripcion: 'Selección de quesos artesanos con mermelada',        disponible: true },
-  { categoriaId: 'entrantes', nombre: 'Croquetas caseras',   precio: 8.00,  descripcion: 'Croquetas de jamón ibérico (6 uds)',                 disponible: true },
-  { categoriaId: 'entrantes', nombre: 'Pulpo a la gallega',  precio: 16.00, descripcion: 'Pulpo cocido con pimentón y aceite de oliva',        disponible: true },
-  { categoriaId: 'entrantes', nombre: 'Gambas al ajillo',    precio: 12.00, descripcion: 'Gambas salteadas con ajo y guindilla',               disponible: true },
-  // Carnes
-  { categoriaId: 'carnes', nombre: 'Chuletón de vaca',    precio: 28.00, descripcion: 'Chuletón de vaca madurado, 400gr a la brasa',         disponible: true },
-  { categoriaId: 'carnes', nombre: 'Solomillo ibérico',   precio: 24.00, descripcion: 'Solomillo ibérico a la plancha con patatas asadas',   disponible: true },
-  { categoriaId: 'carnes', nombre: 'Entrecot angus',      precio: 22.00, descripcion: 'Entrecot de ternera Angus al punto',                  disponible: true },
-  { categoriaId: 'carnes', nombre: 'Pollo a la brasa',    precio: 14.00, descripcion: 'Medio pollo asado al carbón con alioli',              disponible: true },
-  { categoriaId: 'carnes', nombre: 'Secreto ibérico',     precio: 18.00, descripcion: 'Secreto de cerdo ibérico con pimientos asados',       disponible: true },
-  // Pescados
-  { categoriaId: 'pescados', nombre: 'Merluza a la romana',  precio: 18.00, descripcion: 'Merluza rebozada con patatas panadera',              disponible: true },
-  { categoriaId: 'pescados', nombre: 'Dorada al horno',      precio: 20.00, descripcion: 'Dorada entera al horno con verduras y limón',        disponible: true },
-  { categoriaId: 'pescados', nombre: 'Salmón a la plancha',  precio: 19.00, descripcion: 'Salmón noruego con salsa de eneldo y espárragos',    disponible: true },
-  { categoriaId: 'pescados', nombre: 'Bacalao confitado',    precio: 21.00, descripcion: 'Lomo de bacalao confitado con pil pil tradicional',  disponible: true },
-  // Postres
-  { categoriaId: 'postres', nombre: 'Tarta de queso',          precio: 6.00, descripcion: 'Tarta de queso vasca caramelizada',           disponible: true },
-  { categoriaId: 'postres', nombre: 'Brownie con helado',      precio: 5.50, descripcion: 'Brownie de chocolate con helado de vainilla',  disponible: true },
-  { categoriaId: 'postres', nombre: 'Coulant de chocolate',    precio: 6.50, descripcion: 'Coulant templado con corazón fundido',         disponible: true },
-  { categoriaId: 'postres', nombre: 'Flan de huevo casero',    precio: 4.00, descripcion: 'Flan artesano con caramelo tostado',           disponible: true },
-  { categoriaId: 'postres', nombre: 'Tiramisú',                precio: 5.50, descripcion: 'Tiramisú clásico con café y mascarpone',       disponible: true },
-  // Bebidas
-  { categoriaId: 'bebidas', nombre: 'Coca-Cola',              precio: 2.50,  descripcion: 'Coca-Cola, lata 33cl',             disponible: true },
-  { categoriaId: 'bebidas', nombre: 'Agua sin gas',           precio: 1.80,  descripcion: 'Agua mineral sin gas, 50cl',       disponible: true },
-  { categoriaId: 'bebidas', nombre: 'Agua con gas',           precio: 2.00,  descripcion: 'Agua mineral con gas, 50cl',       disponible: true },
-  { categoriaId: 'bebidas', nombre: 'Cerveza caña',           precio: 2.20,  descripcion: 'Caña de cerveza rubia, 25cl',      disponible: true },
-  { categoriaId: 'bebidas', nombre: 'Cerveza botellín',       precio: 2.80,  descripcion: 'Botellín de cerveza, 33cl',        disponible: true },
-  { categoriaId: 'bebidas', nombre: 'Vino blanco copa',       precio: 3.20,  descripcion: 'Copa de vino blanco de la casa',   disponible: true },
-  { categoriaId: 'bebidas', nombre: 'Vino tinto copa',        precio: 3.20,  descripcion: 'Copa de vino tinto de la casa',    disponible: true },
-  { categoriaId: 'bebidas', nombre: 'Rioja botella',          precio: 18.00, descripcion: 'Botella de Rioja Reserva',         disponible: true },
-  { categoriaId: 'bebidas', nombre: 'Sangría jarra',          precio: 9.00,  descripcion: 'Jarra de sangría casera, 1L',      disponible: true },
-  // Cafés
-  { categoriaId: 'cafes', nombre: 'Café solo',       precio: 1.50, descripcion: 'Espresso doble',                    disponible: true },
-  { categoriaId: 'cafes', nombre: 'Café con leche',  precio: 1.80, descripcion: 'Espresso con leche vaporizada',     disponible: true },
-  { categoriaId: 'cafes', nombre: 'Cortado',         precio: 1.60, descripcion: 'Espresso cortado con leche',        disponible: true },
-  { categoriaId: 'cafes', nombre: 'Cappuccino',      precio: 2.20, descripcion: 'Cappuccino con espuma de leche',    disponible: true },
-  { categoriaId: 'cafes', nombre: 'Té / Infusión',   precio: 2.00, descripcion: 'Variedad a elegir',                 disponible: true },
+  // Entrantes → cocina
+  { categoriaId: 'entrantes', nombre: 'Pan con tomate',      precio: 3.50,  descripcion: 'Pan artesano con tomate natural y aceite de oliva', disponible: true, destino: 'cocina' },
+  { categoriaId: 'entrantes', nombre: 'Jamón ibérico',       precio: 14.00, descripcion: 'Jamón ibérico de bellota, cortado a mano',          disponible: true, destino: 'cocina' },
+  { categoriaId: 'entrantes', nombre: 'Tabla de quesos',     precio: 11.00, descripcion: 'Selección de quesos artesanos con mermelada',        disponible: true, destino: 'cocina' },
+  { categoriaId: 'entrantes', nombre: 'Croquetas caseras',   precio: 8.00,  descripcion: 'Croquetas de jamón ibérico (6 uds)',                 disponible: true, destino: 'cocina' },
+  { categoriaId: 'entrantes', nombre: 'Pulpo a la gallega',  precio: 16.00, descripcion: 'Pulpo cocido con pimentón y aceite de oliva',        disponible: true, destino: 'cocina' },
+  { categoriaId: 'entrantes', nombre: 'Gambas al ajillo',    precio: 12.00, descripcion: 'Gambas salteadas con ajo y guindilla',               disponible: true, destino: 'cocina' },
+  // Carnes → cocina
+  { categoriaId: 'carnes', nombre: 'Chuletón de vaca',    precio: 28.00, descripcion: 'Chuletón de vaca madurado, 400gr a la brasa',         disponible: true, destino: 'cocina' },
+  { categoriaId: 'carnes', nombre: 'Solomillo ibérico',   precio: 24.00, descripcion: 'Solomillo ibérico a la plancha con patatas asadas',   disponible: true, destino: 'cocina' },
+  { categoriaId: 'carnes', nombre: 'Entrecot angus',      precio: 22.00, descripcion: 'Entrecot de ternera Angus al punto',                  disponible: true, destino: 'cocina' },
+  { categoriaId: 'carnes', nombre: 'Pollo a la brasa',    precio: 14.00, descripcion: 'Medio pollo asado al carbón con alioli',              disponible: true, destino: 'cocina' },
+  { categoriaId: 'carnes', nombre: 'Secreto ibérico',     precio: 18.00, descripcion: 'Secreto de cerdo ibérico con pimientos asados',       disponible: true, destino: 'cocina' },
+  // Pescados → cocina
+  { categoriaId: 'pescados', nombre: 'Merluza a la romana',  precio: 18.00, descripcion: 'Merluza rebozada con patatas panadera',              disponible: true, destino: 'cocina' },
+  { categoriaId: 'pescados', nombre: 'Dorada al horno',      precio: 20.00, descripcion: 'Dorada entera al horno con verduras y limón',        disponible: true, destino: 'cocina' },
+  { categoriaId: 'pescados', nombre: 'Salmón a la plancha',  precio: 19.00, descripcion: 'Salmón noruego con salsa de eneldo y espárragos',    disponible: true, destino: 'cocina' },
+  { categoriaId: 'pescados', nombre: 'Bacalao confitado',    precio: 21.00, descripcion: 'Lomo de bacalao confitado con pil pil tradicional',  disponible: true, destino: 'cocina' },
+  // Postres → cocina
+  { categoriaId: 'postres', nombre: 'Tarta de queso',          precio: 6.00, descripcion: 'Tarta de queso vasca caramelizada',           disponible: true, destino: 'cocina' },
+  { categoriaId: 'postres', nombre: 'Brownie con helado',      precio: 5.50, descripcion: 'Brownie de chocolate con helado de vainilla',  disponible: true, destino: 'cocina' },
+  { categoriaId: 'postres', nombre: 'Coulant de chocolate',    precio: 6.50, descripcion: 'Coulant templado con corazón fundido',         disponible: true, destino: 'cocina' },
+  { categoriaId: 'postres', nombre: 'Flan de huevo casero',    precio: 4.00, descripcion: 'Flan artesano con caramelo tostado',           disponible: true, destino: 'cocina' },
+  { categoriaId: 'postres', nombre: 'Tiramisú',                precio: 5.50, descripcion: 'Tiramisú clásico con café y mascarpone',       disponible: true, destino: 'cocina' },
+  // Bebidas → barra
+  { categoriaId: 'bebidas', nombre: 'Coca-Cola',              precio: 2.50,  descripcion: 'Coca-Cola, lata 33cl',             disponible: true, destino: 'barra' },
+  { categoriaId: 'bebidas', nombre: 'Agua sin gas',           precio: 1.80,  descripcion: 'Agua mineral sin gas, 50cl',       disponible: true, destino: 'barra' },
+  { categoriaId: 'bebidas', nombre: 'Agua con gas',           precio: 2.00,  descripcion: 'Agua mineral con gas, 50cl',       disponible: true, destino: 'barra' },
+  { categoriaId: 'bebidas', nombre: 'Cerveza caña',           precio: 2.20,  descripcion: 'Caña de cerveza rubia, 25cl',      disponible: true, destino: 'barra' },
+  { categoriaId: 'bebidas', nombre: 'Cerveza botellín',       precio: 2.80,  descripcion: 'Botellín de cerveza, 33cl',        disponible: true, destino: 'barra' },
+  { categoriaId: 'bebidas', nombre: 'Vino blanco copa',       precio: 3.20,  descripcion: 'Copa de vino blanco de la casa',   disponible: true, destino: 'barra' },
+  { categoriaId: 'bebidas', nombre: 'Vino tinto copa',        precio: 3.20,  descripcion: 'Copa de vino tinto de la casa',    disponible: true, destino: 'barra' },
+  { categoriaId: 'bebidas', nombre: 'Rioja botella',          precio: 18.00, descripcion: 'Botella de Rioja Reserva',         disponible: true, destino: 'barra' },
+  { categoriaId: 'bebidas', nombre: 'Sangría jarra',          precio: 9.00,  descripcion: 'Jarra de sangría casera, 1L',      disponible: true, destino: 'barra' },
+  // Cafés → barra
+  { categoriaId: 'cafes', nombre: 'Café solo',       precio: 1.50, descripcion: 'Espresso doble',                    disponible: true, destino: 'barra' },
+  { categoriaId: 'cafes', nombre: 'Café con leche',  precio: 1.80, descripcion: 'Espresso con leche vaporizada',     disponible: true, destino: 'barra' },
+  { categoriaId: 'cafes', nombre: 'Cortado',         precio: 1.60, descripcion: 'Espresso cortado con leche',        disponible: true, destino: 'barra' },
+  { categoriaId: 'cafes', nombre: 'Cappuccino',      precio: 2.20, descripcion: 'Cappuccino con espuma de leche',    disponible: true, destino: 'barra' },
+  { categoriaId: 'cafes', nombre: 'Té / Infusión',   precio: 2.00, descripcion: 'Variedad a elegir',                 disponible: true, destino: 'barra' },
 ];
 
 export async function isSeeded(): Promise<boolean> {
