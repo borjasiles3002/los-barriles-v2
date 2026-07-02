@@ -20,7 +20,6 @@ import { ChatIA } from './components/ChatIA';
 import { FichajeScreen } from './components/FichajeScreen';
 import { PersonalView } from './components/PersonalView';
 import { HorasView } from './components/HorasView';
-import { MensajesView } from './components/MensajesView';
 import { TareasView } from './components/TareasView';
 import { PerfilView } from './components/PerfilView';
 import { AperturaView } from './components/AperturaView';
@@ -29,7 +28,6 @@ import { ConfigRestauranteView } from './components/ConfigRestauranteView';
 import { FullScreenLoader } from './components/ui/LoadingSpinner';
 import { Badge } from './components/ui/Badge';
 import { useAlertas } from './hooks/useAlertas';
-import { useTotalNoLeidos } from './hooks/useMensajes';
 import { useTareasPendientesCount } from './hooks/useTareas';
 import { signOut } from 'firebase/auth';
 import { auth } from './firebase';
@@ -53,7 +51,7 @@ type View =
   | 'tpv' | 'kitchen' | 'sala' | 'carta'
   | 'dashboard' | 'informes' | 'gastos' | 'cierre'
   | 'facturas' | 'stock' | 'escandallos' | 'rentabilidad' | 'alertas'
-  | 'personal' | 'horas' | 'mensajes' | 'tareas' | 'perfil'
+  | 'personal' | 'horas' | 'tareas' | 'perfil'
   | 'apertura' | 'clientes' | 'config';
 
 const VIEW_LABELS: Record<View, string> = {
@@ -72,7 +70,6 @@ const VIEW_LABELS: Record<View, string> = {
   alertas:      '🔔 Alertas',
   personal:     '👥 Personal',
   horas:        '⏱ Horas',
-  mensajes:     '💬 Mensajes',
   tareas:       '✅ Tareas',
   perfil:       '👤 Perfil',
   apertura:     '🌅 Apertura',
@@ -81,7 +78,7 @@ const VIEW_LABELS: Record<View, string> = {
 };
 
 const VIEWS_GERENTE: View[] = [
-  'tpv', 'sala', 'carta', 'apertura', 'clientes', 'personal', 'horas', 'tareas', 'mensajes',
+  'tpv', 'sala', 'carta', 'apertura', 'clientes', 'personal', 'horas', 'tareas',
   'dashboard', 'informes', 'gastos', 'cierre', 'facturas', 'stock',
   'escandallos', 'rentabilidad', 'alertas', 'config', 'perfil',
 ];
@@ -89,10 +86,10 @@ const VIEWS_GERENTE: View[] = [
 const ROLE_VIEWS: Record<Role, View[]> = {
   gerente:  VIEWS_GERENTE,
   admin:    VIEWS_GERENTE,
-  manager:  ['tpv', 'sala', 'carta', 'apertura', 'clientes', 'personal', 'horas', 'tareas', 'mensajes', 'dashboard', 'informes', 'gastos', 'cierre', 'perfil'],
-  camarero: ['tpv', 'sala', 'tareas', 'mensajes', 'perfil'],
-  barman:   ['tpv', 'tareas', 'mensajes', 'perfil'],
-  cocinero: ['kitchen', 'stock', 'tareas', 'mensajes', 'perfil'],
+  manager:  ['tpv', 'sala', 'carta', 'apertura', 'clientes', 'personal', 'horas', 'tareas', 'dashboard', 'informes', 'gastos', 'cierre', 'perfil'],
+  camarero: ['tpv', 'sala', 'tareas', 'perfil'],
+  barman:   ['tpv', 'tareas', 'perfil'],
+  cocinero: ['kitchen', 'stock', 'tareas', 'perfil'],
 };
 
 const ROLE_DEFAULT: Record<Role, View> = {
@@ -110,16 +107,15 @@ const IA_ROLES: Role[] = ['gerente', 'admin', 'manager'];
 
 function NavBar({
   currentView, allowedViews, onNavigate, userName, onLogout,
-  alertasBadge, mensajesBadge, tareasBadge,
+  alertasBadge, tareasBadge,
 }: {
-  currentView:   View;
-  allowedViews:  View[];
-  onNavigate:    (v: View) => void;
-  userName:      string;
-  onLogout:      () => void;
-  alertasBadge:  number;
-  mensajesBadge: number;
-  tareasBadge:   number;
+  currentView:  View;
+  allowedViews: View[];
+  onNavigate:   (v: View) => void;
+  userName:     string;
+  onLogout:     () => void;
+  alertasBadge: number;
+  tareasBadge:  number;
 }) {
   return (
     <nav className="fixed bottom-0 left-0 right-0 z-40 bg-slate-900 border-t border-slate-700 flex items-center">
@@ -131,9 +127,8 @@ function NavBar({
             }`}>
             <span className="text-base leading-none">{VIEW_LABELS[v].split(' ')[0]}</span>
             <span className="whitespace-nowrap">{VIEW_LABELS[v].split(' ').slice(1).join(' ')}</span>
-            {v === 'alertas'   && alertasBadge   > 0 && <Badge count={alertasBadge} />}
-            {v === 'mensajes'  && mensajesBadge  > 0 && <Badge count={mensajesBadge} />}
-            {v === 'tareas'    && tareasBadge    > 0 && <Badge count={tareasBadge} />}
+            {v === 'alertas' && alertasBadge > 0 && <Badge count={alertasBadge} />}
+            {v === 'tareas'  && tareasBadge  > 0 && <Badge count={tareasBadge} />}
           </button>
         ))}
       </div>
@@ -249,10 +244,9 @@ function MainApp() {
   const [fichajeGateChecked, setFichajeGateChecked] = useState(false);
   const [showFichajeGate,    setShowFichajeGate]    = useState(false);
 
-  const { alertas }     = useAlertas(true);
-  const alertasBadge    = alertas.length;
-  const mensajesBadge   = useTotalNoLeidos(user?.uid ?? '');
-  const tareasBadge     = useTareasPendientesCount(user?.uid ?? '');
+  const { alertas }  = useAlertas(true);
+  const alertasBadge = alertas.length;
+  const tareasBadge  = useTareasPendientesCount(user?.uid ?? '');
 
   useEffect(() => {
     if (user) setLocalUser(user);
@@ -336,9 +330,8 @@ function MainApp() {
       {safeView === 'rentabilidad' && <RentabilidadView />}
       {safeView === 'alertas'      && <AlertasView />}
       {safeView === 'personal'     && <PersonalView />}
-      {safeView === 'horas'        && <HorasView />}
-      {safeView === 'mensajes'     && <MensajesView user={activeUser} />}
-      {safeView === 'tareas'       && <TareasView user={activeUser} />}
+      {safeView === 'horas'   && <HorasView />}
+      {safeView === 'tareas'  && <TareasView user={activeUser} />}
       {safeView === 'perfil'       && (
         <PerfilView
           user={activeUser}
@@ -357,7 +350,6 @@ function MainApp() {
           userName={activeUser.nombre}
           onLogout={() => void handleLogout()}
           alertasBadge={alertasBadge}
-          mensajesBadge={mensajesBadge}
           tareasBadge={tareasBadge}
         />
       )}

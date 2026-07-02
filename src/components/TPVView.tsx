@@ -25,6 +25,8 @@ import {
 import { LoadingSpinner, FullScreenLoader } from './ui/LoadingSpinner';
 import { StockBadge }         from './AperturaView';
 import { useProductosStock }  from '../hooks/useStock';
+import { useColaImpresion }   from '../hooks/useColaImpresion';
+import { encolarImpresion }   from '../services/impresion.service';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -191,17 +193,18 @@ function CobroModal({
   pedido: Pedido;
   mesa: Mesa;
   cliente: Cliente | null;
-  onCobrar: (metodo: MetodoPago, total: number, emitirFactura: boolean, motivo?: string) => Promise<void>;
+  onCobrar: (metodo: MetodoPago, total: number, emitirFactura: boolean, motivo?: string, imprimirTicket?: boolean) => Promise<void>;
   onClose: () => void;
 }) {
-  const [metodo,         setMetodo]         = useState<MetodoPago | null>(null);
-  const [efectivoRec,    setEfectivoRec]    = useState('');
-  const [personas,       setPersonas]       = useState(mesa.comensales ?? 2);
-  const [dividir,        setDividir]        = useState(false);
-  const [descuento,      setDescuento]      = useState(0);
-  const [motivoInvit,    setMotivoInvit]    = useState('');
-  const [emitirFact,     setEmitirFact]     = useState(false);
-  const [loading,        setLoading]        = useState(false);
+  const [metodo,              setMetodo]              = useState<MetodoPago | null>(null);
+  const [efectivoRec,         setEfectivoRec]         = useState('');
+  const [personas,            setPersonas]            = useState(mesa.comensales ?? 2);
+  const [dividir,             setDividir]             = useState(false);
+  const [descuento,           setDescuento]           = useState(0);
+  const [motivoInvit,         setMotivoInvit]         = useState('');
+  const [emitirFact,          setEmitirFact]          = useState(false);
+  const [imprimirTicketTP,    setImprimirTicketTP]    = useState(true);
+  const [loading,             setLoading]             = useState(false);
 
   const totalConDesc = pedido.total * (1 - descuento / 100);
   const totalPorPers = dividir && personas > 0 ? totalConDesc / personas : null;
@@ -214,7 +217,7 @@ function CobroModal({
     if (!metodo) return;
     setLoading(true);
     try {
-      await onCobrar(metodo, totalConDesc, emitirFact, metodo === 'invitacion' ? motivoInvit : undefined);
+      await onCobrar(metodo, totalConDesc, emitirFact, metodo === 'invitacion' ? motivoInvit : undefined, imprimirTicketTP);
     } finally {
       setLoading(false);
     }
@@ -289,6 +292,16 @@ function CobroModal({
               </div>
             </label>
           )}
+
+          {/* Imprimir ticket térmico */}
+          <label className="flex items-center gap-3 bg-slate-700/50 rounded-xl px-4 py-3 cursor-pointer">
+            <input type="checkbox" checked={imprimirTicketTP} onChange={e => setImprimirTicketTP(e.target.checked)}
+              className="w-5 h-5 rounded accent-amber-500" />
+            <div>
+              <p className="text-white font-semibold text-sm">🖨 Imprimir ticket en TPV</p>
+              <p className="text-slate-400 text-xs">Envía a la impresora de barra (requiere QZ Tray)</p>
+            </div>
+          </label>
 
           {/* Método de pago */}
           <p className="text-slate-400 text-xs font-bold uppercase">Método de pago</p>
@@ -647,6 +660,16 @@ function PedidoPanel({
     setAddingProd(prod.id);
     try {
       await agregarProducto(pedido.id, prod, '');
+      if (prod.destino === 'barra' || prod.destino === 'ambos') {
+        void encolarImpresion({
+          tipo: 'barra', mesaNombre: mesa.nombre, pedidoId: pedido.id,
+          lineas: [{
+            id: `p-${Date.now()}`, productoId: prod.id, nombre: prod.nombre,
+            precio: prod.precio, cantidad: 1, estado: 'pendiente',
+            destino: prod.destino, tipoIva: prod.tipoIva ?? 'reducido',
+          }],
+        });
+      }
     } catch (e) {
       console.error('[handleAdd]', e);
       const msg = e instanceof Error ? e.message : 'Error al añadir producto';
@@ -654,7 +677,7 @@ function PedidoPanel({
     } finally {
       setAddingProd(null);
     }
-  }, [pedido.id]);
+  }, [pedido.id, pedido.lineas, mesa.nombre]);
 
   useEffect(() => {
     if (!errorToast) return;
@@ -679,8 +702,15 @@ function PedidoPanel({
 
   const handleEnviarCocina = async () => {
     setLoadingAct(true);
-    try { await cambiarEstadoPedido(pedido.id, 'en_cocina'); }
-    catch (e) { console.error(e); }
+    try {
+      await cambiarEstadoPedido(pedido.id, 'en_cocina');
+      const lineasCocina = pedido.lineas.filter(
+        l => l.destino === 'cocina' || l.destino === 'ambos' || !l.destino,
+      );
+      if (lineasCocina.length > 0) {
+        void encolarImpresion({ tipo: 'cocina', mesaNombre: mesa.nombre, pedidoId: pedido.id, lineas: lineasCocina });
+      }
+    } catch (e) { console.error(e); }
     finally { setLoadingAct(false); }
   };
 
@@ -1224,7 +1254,8 @@ export function TPVView() {
   const { categorias, productos }      = useCarta();
   const { notificaciones }             = useNotificaciones();
   const { ingresos }                   = useIngresosHoy();
-  useProductosStock(); // keep subscription alive for stock badges in PedidoPanel
+  useProductosStock();   // keep subscription alive for stock badges in PedidoPanel
+  useColaImpresion();    // TPV principal: procesa trabajos de impresión vía QZ Tray
 
   const [selectedMesaId,   setSelectedMesaId]   = useState<string | null>(null);
   const [openingMesa,      setOpeningMesa]       = useState<string | null>(null);
@@ -1273,11 +1304,10 @@ export function TPVView() {
     } finally { setOpeningMesa(null); }
   };
 
-  const handleCobrar = async (metodo: MetodoPago, total: number, emitirFact: boolean, _motivo?: string) => {
+  const handleCobrar = async (metodo: MetodoPago, total: number, emitirFact: boolean, _motivo?: string, imprimirTicket?: boolean) => {
     if (!selectedPedido || !selectedMesa) return;
-    // Snapshot de los datos antes de cerrar (el pedido desaparecerá del onSnapshot)
-    const pedidoSnap = { ...selectedPedido };
-    const mesaSnap   = { ...selectedMesa };
+    const pedidoSnap  = { ...selectedPedido };
+    const mesaSnap    = { ...selectedMesa };
     const clienteSnap = clienteSelec;
     setShowCobro(false);
     setSelectedMesaId(null);
@@ -1299,6 +1329,12 @@ export function TPVView() {
         await generarPDFFactura(factura, config);
       } else {
         await generarPDFTicket(pedidoSnap.id, mesaSnap.nombre, pedidoSnap.lineas, total, config);
+      }
+      if (imprimirTicket) {
+        void encolarImpresion({
+          tipo: 'ticket', mesaNombre: mesaSnap.nombre,
+          pedidoId: pedidoSnap.id, lineas: pedidoSnap.lineas, total,
+        });
       }
     } catch (e) {
       console.error('Error al cobrar:', e);

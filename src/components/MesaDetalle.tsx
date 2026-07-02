@@ -12,6 +12,7 @@ import {
 } from '../services/facturasEmitidas.service';
 import { StockBadge } from './AperturaView';
 import { LoadingSpinner } from './ui/LoadingSpinner';
+import { encolarImpresion } from '../services/impresion.service';
 
 interface Props {
   mesa: Mesa;
@@ -53,8 +54,9 @@ export function MesaDetalle({ mesa, pedido, categorias, productos, onClose }: Pr
   const [loadingAction, setLoadingAction]     = useState(false);
   const [addingProd,   setAddingProd]         = useState<string | null>(null);
   const [errorToast,   setErrorToast]         = useState<string | null>(null);
-  const [showCobroModal, setShowCobroModal]   = useState(false);
-  const [emitirFacturaFlag, setEmitirFacturaFlag] = useState(false);
+  const [showCobroModal, setShowCobroModal]         = useState(false);
+  const [emitirFacturaFlag, setEmitirFacturaFlag]   = useState(false);
+  const [imprimirTicketTPV, setImprimirTicketTPV]   = useState(true);
   const [editarNota, setEditarNota]           = useState<{ lineaId: string; nombre: string; notaActual: string } | null>(null);
   const [notaTexto, setNotaTexto]             = useState('');
   // Cliente
@@ -83,6 +85,17 @@ export function MesaDetalle({ mesa, pedido, categorias, productos, onClose }: Pr
     setAddingProd(prod.id);
     try {
       await agregarProducto(pedido.id, prod, notas);
+      if (prod.destino === 'barra' || prod.destino === 'ambos') {
+        void encolarImpresion({
+          tipo: 'barra', mesaNombre: mesa.nombre, pedidoId: pedido.id,
+          lineas: [{
+            id: `p-${Date.now()}`, productoId: prod.id, nombre: prod.nombre,
+            precio: prod.precio, cantidad: 1, estado: 'pendiente',
+            destino: prod.destino, tipoIva: prod.tipoIva ?? 'reducido',
+            ...(notas ? { notas } : {}),
+          }],
+        });
+      }
     } catch (e) {
       console.error('[handleAddProduct]', e);
       const msg = e instanceof Error ? e.message : 'Error al añadir';
@@ -113,8 +126,15 @@ export function MesaDetalle({ mesa, pedido, categorias, productos, onClose }: Pr
 
   const handleEnviarCocina = async () => {
     setLoadingAction(true);
-    try { await cambiarEstadoPedido(pedido.id, 'en_cocina'); }
-    catch (e) { console.error(e); }
+    try {
+      await cambiarEstadoPedido(pedido.id, 'en_cocina');
+      const lineasCocina = pedido.lineas.filter(
+        l => l.destino === 'cocina' || l.destino === 'ambos' || !l.destino,
+      );
+      if (lineasCocina.length > 0) {
+        void encolarImpresion({ tipo: 'cocina', mesaNombre: mesa.nombre, pedidoId: pedido.id, lineas: lineasCocina });
+      }
+    } catch (e) { console.error(e); }
     finally { setLoadingAction(false); }
   };
 
@@ -157,24 +177,24 @@ export function MesaDetalle({ mesa, pedido, categorias, productos, onClose }: Pr
         pedido.camareroId ?? '', pedido.camareroNombre ?? '',
       );
 
-      // Registrar visita en cliente
-      if (clienteAsignado) {
-        await registrarVisitaCliente(clienteAsignado.id, pedido.total);
-      }
+      if (clienteAsignado) await registrarVisitaCliente(clienteAsignado.id, pedido.total);
 
-      // Generar PDF
       const config = await getConfigRestaurante();
       if (emitirFacturaFlag && clienteAsignado) {
         const factura = await emitirFactura({
-          pedidoId:   pedido.id,
-          mesaNombre: mesa.nombre,
-          lineas:     pedido.lineas,
-          total:      pedido.total,
-          cliente:    clienteAsignado,
+          pedidoId: pedido.id, mesaNombre: mesa.nombre,
+          lineas: pedido.lineas, total: pedido.total, cliente: clienteAsignado,
         });
         await generarPDFFactura(factura, config);
       } else {
         await generarPDFTicket(pedido.id, mesa.nombre, pedido.lineas, pedido.total, config);
+      }
+
+      if (imprimirTicketTPV) {
+        void encolarImpresion({
+          tipo: 'ticket', mesaNombre: mesa.nombre,
+          pedidoId: pedido.id, lineas: pedido.lineas, total: pedido.total,
+        });
       }
 
       setShowCobroModal(false);
@@ -204,18 +224,22 @@ export function MesaDetalle({ mesa, pedido, categorias, productos, onClose }: Pr
             )}
             {clienteAsignado && (
               <label className="flex items-center gap-3 bg-slate-700 rounded-xl px-4 py-3 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={emitirFacturaFlag}
-                  onChange={e => setEmitirFacturaFlag(e.target.checked)}
-                  className="w-5 h-5 rounded accent-amber-500"
-                />
+                <input type="checkbox" checked={emitirFacturaFlag} onChange={e => setEmitirFacturaFlag(e.target.checked)}
+                  className="w-5 h-5 rounded accent-amber-500" />
                 <div>
                   <p className="text-white font-semibold text-sm">Emitir factura fiscal</p>
                   <p className="text-slate-400 text-xs">{clienteAsignado.nombre} {clienteAsignado.apellidos}</p>
                 </div>
               </label>
             )}
+            <label className="flex items-center gap-3 bg-slate-700 rounded-xl px-4 py-3 cursor-pointer">
+              <input type="checkbox" checked={imprimirTicketTPV} onChange={e => setImprimirTicketTPV(e.target.checked)}
+                className="w-5 h-5 rounded accent-amber-500" />
+              <div>
+                <p className="text-white font-semibold text-sm">🖨 Imprimir ticket en TPV</p>
+                <p className="text-slate-400 text-xs">Envía a la impresora de barra (requiere QZ Tray)</p>
+              </div>
+            </label>
             <div className="grid grid-cols-2 gap-3">
               {METODOS_PAGO.map(({ key, label, icon }) => (
                 <button key={key} onClick={() => handleCobrar(key)} disabled={loadingAction}

@@ -78,28 +78,6 @@ export interface Tarea {
   completadaEn?: string;
 }
 
-// ─── Mensajería ───────────────────────────────────────────────────────────────
-
-export interface Conversacion {
-  id: string;
-  participantes: string[];
-  participantesNombres: Record<string, string>;
-  ultimoMensaje?: string;
-  ultimaFecha?: string;
-  noLeidos: Record<string, number>;
-}
-
-export interface Mensaje {
-  id: string;
-  conversacionId: string;
-  de: string;
-  para: string;
-  texto: string;
-  timestamp: string;
-  leido: boolean;
-  tareaId?: string;
-}
-
 // ─── Mesas & Pedidos ──────────────────────────────────────────────────────────
 
 export type MesaEstado    = 'libre' | 'ocupada' | 'cuenta_pedida';
@@ -449,4 +427,27 @@ export interface CierreCompleto {
 export interface Objetivo {
   id: string;
   ventasMensuales: number;
+}
+
+// ─── Impresión (QZ Tray) ──────────────────────────────────────────────────────
+
+export type TipoColaImpresion   = 'cocina' | 'barra' | 'ticket';
+export type EstadoColaImpresion = 'pendiente' | 'procesado' | 'error';
+
+export interface ColaImpresion {
+  id:           string;
+  tipo:         TipoColaImpresion;
+  mesaNombre:   string;
+  pedidoId:     string;
+  lineas:       LineaPedido[];
+  total?:       number;
+  estado:       EstadoColaImpresion;
+  createdAt:    string;
+  procesadoAt?: string;
+  errorMsg?:    string;
+}
+
+export interface ConfigImpresoras {
+  impresoraCocina: string;
+  impresoraBarra:  string;
 }
