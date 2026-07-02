@@ -5,7 +5,7 @@ import { LoginView } from './components/LoginView';
 import { TPVView } from './components/TPVView';
 import { KitchenView } from './components/KitchenView';
 import { SalaView } from './components/SalaView';
-import { BarraTPVView } from './components/BarraTPVView';
+
 import { CartaView } from './components/CartaView';
 import { FacturasView } from './components/FacturasView';
 import { StockView } from './components/StockView';
@@ -225,7 +225,8 @@ function MonitorView({ route }: { route: 'cocina' | 'sala' | 'barra' }) {
   if (!user)       return <LoginView />;
   if (route === 'cocina') return <KitchenView />;
   if (route === 'sala')   return <SalaView />;
-  return <BarraTPVView />;
+  // /tpv → TPV completo con pedido íntegro, bebidas + cocina
+  return <TPVView />;
 }
 
 // ─── App root ─────────────────────────────────────────────────────────────────
