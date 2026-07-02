@@ -605,6 +605,8 @@ function PedidoPanel({
   const [notaTexto,    setNotaTexto]    = useState('');
   const [loadingLine,  setLoadingLine]  = useState<string | null>(null);
   const [loadingAct,   setLoadingAct]   = useState(false);
+  const [addingProd,   setAddingProd]   = useState<string | null>(null);
+  const [errorToast,   setErrorToast]   = useState<string | null>(null);
   const [showCliente,  setShowCliente]  = useState(false);
   const [clienteBusq,  setClienteBusq]  = useState('');
   const [clienteRes,   setClienteRes]   = useState<Cliente[]>([]);
@@ -642,9 +644,23 @@ function PedidoPanel({
   }, [productos, activeCat, busqueda]);
 
   const handleAdd = useCallback(async (prod: Producto) => {
-    try { await agregarProducto(pedido.id, prod, ''); }
-    catch (e) { console.error(e); }
+    setAddingProd(prod.id);
+    try {
+      await agregarProducto(pedido.id, prod, '');
+    } catch (e) {
+      console.error('[handleAdd]', e);
+      const msg = e instanceof Error ? e.message : 'Error al añadir producto';
+      setErrorToast(msg === 'STOCK_AGOTADO' ? 'Stock agotado' : msg);
+    } finally {
+      setAddingProd(null);
+    }
   }, [pedido.id]);
+
+  useEffect(() => {
+    if (!errorToast) return;
+    const id = setTimeout(() => setErrorToast(null), 3000);
+    return () => clearTimeout(id);
+  }, [errorToast]);
 
   const handleRemove = useCallback(async (lineaId: string) => {
     setLoadingLine(lineaId);
@@ -699,6 +715,13 @@ function PedidoPanel({
 
   return (
     <div className="flex flex-col h-full bg-slate-900 overflow-hidden relative">
+
+      {/* ── Toast error añadir producto ── */}
+      {errorToast && (
+        <div className="absolute top-4 left-1/2 -translate-x-1/2 z-50 bg-red-600 text-white text-sm font-bold px-4 py-2.5 rounded-xl shadow-xl whitespace-nowrap pointer-events-none">
+          ⚠️ {errorToast}
+        </div>
+      )}
 
       {/* ── Modal editar nota ── */}
       {editarNota && (
@@ -869,9 +892,10 @@ function PedidoPanel({
                 const agotado = prod.controlStock && (prod.stockActual ?? 0) === 0;
                 return (
                   <button key={prod.id}
-                    onClick={() => !agotado && void handleAdd(prod)} disabled={agotado}
+                    onClick={() => !agotado && void handleAdd(prod)} disabled={agotado || addingProd === prod.id}
                     className={`border rounded-xl p-2.5 text-left transition-all flex flex-col gap-1 relative ${
                       agotado ? 'bg-slate-800/30 border-slate-700 opacity-50 cursor-not-allowed'
+                      : addingProd === prod.id ? 'scale-95 opacity-70 cursor-wait'
                       : esBarra ? 'bg-blue-950/40 border-blue-700/50 hover:border-blue-400 active:scale-95'
                       : 'bg-slate-800 border-slate-600 hover:border-amber-500 active:scale-95'
                     }`}>

@@ -71,7 +71,7 @@ export async function agregarProducto(
         destino,
         tipoIva,
         controlStock: producto.controlStock ?? false,
-        notas:        notas || undefined,
+        ...(notas ? { notas } : {}),
       });
     }
 

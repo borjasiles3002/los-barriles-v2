@@ -51,6 +51,8 @@ export function MesaDetalle({ mesa, pedido, categorias, productos, onClose }: Pr
   const [tab, setTab]                         = useState<Tab>('carta');
   const [activeCat, setActiveCat]             = useState<string>(categorias[0]?.id ?? '');
   const [loadingAction, setLoadingAction]     = useState(false);
+  const [addingProd,   setAddingProd]         = useState<string | null>(null);
+  const [errorToast,   setErrorToast]         = useState<string | null>(null);
   const [showCobroModal, setShowCobroModal]   = useState(false);
   const [emitirFacturaFlag, setEmitirFacturaFlag] = useState(false);
   const [editarNota, setEditarNota]           = useState<{ lineaId: string; nombre: string; notaActual: string } | null>(null);
@@ -78,8 +80,17 @@ export function MesaDetalle({ mesa, pedido, categorias, productos, onClose }: Pr
   const tieneComida   = lineasComida.length > 0;
 
   const handleAddProduct = async (prod: Producto, notas = '') => {
-    try { await agregarProducto(pedido.id, prod, notas); }
-    catch (e) { console.error(e); }
+    setAddingProd(prod.id);
+    try {
+      await agregarProducto(pedido.id, prod, notas);
+    } catch (e) {
+      console.error('[handleAddProduct]', e);
+      const msg = e instanceof Error ? e.message : 'Error al añadir';
+      setErrorToast(msg === 'STOCK_AGOTADO' ? 'Stock agotado' : msg);
+      setTimeout(() => setErrorToast(null), 3000);
+    } finally {
+      setAddingProd(null);
+    }
   };
 
   const handleEditarNota = (lineaId: string, nombre: string, notaActual: string) => {
@@ -174,6 +185,13 @@ export function MesaDetalle({ mesa, pedido, categorias, productos, onClose }: Pr
 
   return (
     <div className="fixed inset-0 z-50 flex flex-col bg-slate-900">
+
+      {/* ── Toast error añadir producto ── */}
+      {errorToast && (
+        <div className="fixed top-4 left-1/2 -translate-x-1/2 z-[70] bg-red-600 text-white text-sm font-bold px-4 py-2.5 rounded-xl shadow-xl whitespace-nowrap pointer-events-none">
+          ⚠️ {errorToast}
+        </div>
+      )}
 
       {/* ── Modal cobro ── */}
       {showCobroModal && (
@@ -396,13 +414,15 @@ export function MesaDetalle({ mesa, pedido, categorias, productos, onClose }: Pr
                   return (
                     <button key={prod.id}
                       onClick={() => !agotado && void handleAddProduct(prod, '')}
-                      disabled={agotado}
+                      disabled={agotado || addingProd === prod.id}
                       className={`border rounded-xl p-3 text-left transition-all flex flex-col gap-1 relative ${
                         agotado
                           ? 'bg-slate-800/30 border-slate-700 opacity-50 cursor-not-allowed'
-                          : esBarra
-                            ? 'bg-blue-950/40 border-blue-700/50 hover:border-blue-400 active:scale-95'
-                            : 'bg-slate-800 border-slate-600 hover:border-amber-500 active:scale-95'
+                          : addingProd === prod.id
+                            ? 'scale-95 opacity-70 cursor-wait'
+                            : esBarra
+                              ? 'bg-blue-950/40 border-blue-700/50 hover:border-blue-400 active:scale-95'
+                              : 'bg-slate-800 border-slate-600 hover:border-amber-500 active:scale-95'
                       }`}>
                       {qty > 0 && (
                         <span className="absolute top-2 right-2 bg-amber-500 text-black text-[10px] font-black px-1.5 py-0.5 rounded-full">
