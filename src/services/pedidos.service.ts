@@ -4,6 +4,7 @@ import {
 } from 'firebase/firestore';
 import { db } from '../firebase';
 import type { Pedido, LineaPedido, PedidoEstado, Producto, DestinoProducto, TipoIva } from '../types';
+import { round2 } from '../utils/money';
 
 // ─── Abrir mesa ─────────────────────────────────────────────────────────────
 
@@ -74,7 +75,7 @@ export async function agregarProducto(
       });
     }
 
-    const total = lineas.reduce((s, l) => s + l.precio * l.cantidad, 0);
+    const total = round2(lineas.reduce((s, l) => s + l.precio * l.cantidad, 0));
     t.update(pedidoRef, { lineas, total });
 
     // Decrement stock
@@ -130,7 +131,7 @@ export async function quitarProducto(pedidoId: string, lineaId: string): Promise
       lineas = lineas.filter(l => l.id !== lineaId);
     }
 
-    const total = lineas.reduce((s, l) => s + l.precio * l.cantidad, 0);
+    const total = round2(lineas.reduce((s, l) => s + l.precio * l.cantidad, 0));
     t.update(pedidoRef, { lineas, total });
 
     // Restore stock

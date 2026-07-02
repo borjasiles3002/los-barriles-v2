@@ -1,10 +1,11 @@
 import {
   collection, doc, addDoc, updateDoc, getDoc, getDocs,
-  query, where, orderBy, onSnapshot,
+  query, where, orderBy, onSnapshot, runTransaction,
 } from 'firebase/firestore';
 import type { Unsubscribe } from 'firebase/firestore';
 import { db } from '../firebase';
 import type { Cliente } from '../types';
+import { round2 } from '../utils/money';
 
 // ─── Crear cliente ─────────────────────────────────────────────────────────────
 
@@ -32,14 +33,16 @@ export async function actualizarCliente(
 // ─── Registrar visita (cuando se cobra un pedido con cliente) ─────────────────
 
 export async function registrarVisitaCliente(clienteId: string, total: number): Promise<void> {
-  const ref  = doc(db, 'clientes', clienteId);
-  const snap = await getDoc(ref);
-  if (!snap.exists()) return;
-  const data = snap.data() as Omit<Cliente, 'id'>;
-  await updateDoc(ref, {
-    totalVisitas: (data.totalVisitas ?? 0) + 1,
-    totalGastado: Math.round(((data.totalGastado ?? 0) + total) * 100) / 100,
-    ultimaVisita: new Date().toISOString(),
+  const ref = doc(db, 'clientes', clienteId);
+  await runTransaction(db, async (t) => {
+    const snap = await t.get(ref);
+    if (!snap.exists()) return;
+    const data = snap.data() as Omit<Cliente, 'id'>;
+    t.update(ref, {
+      totalVisitas: (data.totalVisitas ?? 0) + 1,
+      totalGastado: round2((data.totalGastado ?? 0) + total),
+      ultimaVisita: new Date().toISOString(),
+    });
   });
 }
 

@@ -1,6 +1,8 @@
 import { collection, addDoc, getDocs, query, where } from 'firebase/firestore';
 import { db } from '../firebase';
 import type { Ingreso, MetodoPago, LineaPedido } from '../types';
+import { IVA_RATES } from '../types';
+import { round2 } from '../utils/money';
 
 export async function registrarIngreso(
   pedidoId: string,
@@ -12,9 +14,20 @@ export async function registrarIngreso(
   camareroId: string,
   camareroNombre: string,
 ): Promise<string> {
-  const now      = new Date();
-  const subtotal = total / 1.1;
-  const iva      = total - subtotal;
+  const now = new Date();
+
+  // Calcular subtotal e IVA correctamente por tipo de IVA de cada línea
+  let subtotalCalc = 0;
+  let ivaCalc = 0;
+  for (const l of lineas) {
+    const rate      = IVA_RATES[l.tipoIva ?? 'reducido'];
+    const totalLinea = round2(l.precio * l.cantidad);
+    const base       = round2(totalLinea / (1 + rate));
+    subtotalCalc    += base;
+    ivaCalc         += totalLinea - base;
+  }
+  const subtotal = round2(subtotalCalc);
+  const iva      = round2(ivaCalc);
 
   const ref = await addDoc(collection(db, 'ingresos'), {
     fecha:          now.toISOString().slice(0, 10),

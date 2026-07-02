@@ -205,8 +205,9 @@ function CobroModal({
 
   const totalConDesc = pedido.total * (1 - descuento / 100);
   const totalPorPers = dividir && personas > 0 ? totalConDesc / personas : null;
-  const cambio = metodo === 'efectivo' && efectivoRec
-    ? parseFloat(efectivoRec) - totalConDesc
+  const efectivoNum = parseFloat(efectivoRec);
+  const cambio = metodo === 'efectivo' && efectivoRec && !isNaN(efectivoNum)
+    ? efectivoNum - totalConDesc
     : null;
 
   const confirmar = async () => {
@@ -1242,32 +1243,43 @@ export function TPVView() {
     try {
       await abrirMesa(mesa.id, mesa.nombre, user?.uid ?? '', user?.nombre ?? '', comensales);
       setSelectedMesaId(mesa.id);
-    } catch (e) { console.error(e); }
-    finally { setOpeningMesa(null); }
+    } catch (e) {
+      console.error('Error al abrir mesa:', e);
+      alert('Error al abrir la mesa. Comprueba la conexión.');
+    } finally { setOpeningMesa(null); }
   };
 
   const handleCobrar = async (metodo: MetodoPago, total: number, emitirFact: boolean, _motivo?: string) => {
     if (!selectedPedido || !selectedMesa) return;
-    await cerrarPedido(selectedPedido.id, selectedMesa.id);
-    await registrarIngreso(
-      selectedPedido.id, selectedMesa.id, selectedMesa.nombre,
-      selectedPedido.lineas, total, metodo,
-      selectedPedido.camareroId ?? '', selectedPedido.camareroNombre ?? '',
-    );
-    if (clienteSelec) await registrarVisitaCliente(clienteSelec.id, total);
-    const config = await getConfigRestaurante();
-    if (emitirFact && clienteSelec) {
-      const factura = await emitirFactura({
-        pedidoId: selectedPedido.id, mesaNombre: selectedMesa.nombre,
-        lineas: selectedPedido.lineas, total, cliente: clienteSelec,
-      });
-      await generarPDFFactura(factura, config);
-    } else {
-      await generarPDFTicket(selectedPedido.id, selectedMesa.nombre, selectedPedido.lineas, total, config);
-    }
+    // Snapshot de los datos antes de cerrar (el pedido desaparecerá del onSnapshot)
+    const pedidoSnap = { ...selectedPedido };
+    const mesaSnap   = { ...selectedMesa };
+    const clienteSnap = clienteSelec;
     setShowCobro(false);
     setSelectedMesaId(null);
     setClienteSelec(null);
+    try {
+      await cerrarPedido(pedidoSnap.id, mesaSnap.id);
+      await registrarIngreso(
+        pedidoSnap.id, mesaSnap.id, mesaSnap.nombre,
+        pedidoSnap.lineas, total, metodo,
+        pedidoSnap.camareroId ?? '', pedidoSnap.camareroNombre ?? '',
+      );
+      if (clienteSnap) await registrarVisitaCliente(clienteSnap.id, total);
+      const config = await getConfigRestaurante();
+      if (emitirFact && clienteSnap) {
+        const factura = await emitirFactura({
+          pedidoId: pedidoSnap.id, mesaNombre: mesaSnap.nombre,
+          lineas: pedidoSnap.lineas, total, cliente: clienteSnap,
+        });
+        await generarPDFFactura(factura, config);
+      } else {
+        await generarPDFTicket(pedidoSnap.id, mesaSnap.nombre, pedidoSnap.lineas, total, config);
+      }
+    } catch (e) {
+      console.error('Error al cobrar:', e);
+      alert('Error al registrar el cobro. Comprueba la conexión y reintenta.');
+    }
   };
 
   // Keyboard shortcuts

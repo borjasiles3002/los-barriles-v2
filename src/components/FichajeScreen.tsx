@@ -69,8 +69,9 @@ export function FichajeScreen() {
         setMensaje(`¡Buenas, ${user.nombre}! Entrada registrada.`);
         setFase('ok_entrada');
       }
-    } catch {
-      setMensaje('Error de conexión. Inténtalo de nuevo.');
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'Error de conexión. Inténtalo de nuevo.';
+      setMensaje(msg);
       setFase('error');
     }
     setCargando(false);

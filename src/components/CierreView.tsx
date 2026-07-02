@@ -3,6 +3,7 @@ import { jsPDF } from 'jspdf';
 import { collection, addDoc } from 'firebase/firestore';
 import { db } from '../firebase';
 import { useIngresosHoy } from '../hooks/useIngresos';
+import { useGastos } from '../hooks/useGastos';
 import type { MetodoPago } from '../types';
 
 const METODO_LABEL: Record<MetodoPago, string> = {
@@ -92,12 +93,14 @@ function exportarPDFCierre(datos: {
 
 export function CierreView() {
   const { ingresos, loading } = useIngresosHoy();
+  const hoy = new Date().toISOString().slice(0, 10);
+  const { gastos, loading: gastosLoading } = useGastos(hoy, hoy);
   const [efectivoReal, setEfectivoReal] = useState('');
   const [cerrando, setCerrando]         = useState(false);
   const [cerradoId, setCerradoId]       = useState<string | null>(null);
 
-  const hoy            = new Date().toISOString().slice(0, 10);
   const totalIngresos  = ingresos.reduce((s, i) => s + i.total, 0);
+  const totalGastos    = gastos.reduce((s, g) => s + g.importe, 0);
   const numeroPedidos  = ingresos.length;
   const ticketMedio    = numeroPedidos > 0 ? totalIngresos / numeroPedidos : 0;
 
@@ -118,8 +121,8 @@ export function CierreView() {
       const ref = await addDoc(collection(db, 'cierresCompletos'), {
         fecha:            hoy,
         totalIngresos,
-        totalGastos:      0,
-        beneficioNeto:    totalIngresos,
+        totalGastos,
+        beneficioNeto:    totalIngresos - totalGastos,
         numeroPedidos,
         ticketMedio,
         efectivoEsperado,
@@ -140,8 +143,8 @@ export function CierreView() {
     exportarPDFCierre({
       fecha: hoy,
       totalIngresos,
-      totalGastos:  0,
-      beneficio:    totalIngresos,
+      totalGastos,
+      beneficio:    totalIngresos - totalGastos,
       numeroPedidos,
       ticketMedio,
       efectivoEsperado,
@@ -160,7 +163,7 @@ export function CierreView() {
       </div>
 
       <div className="p-4 space-y-4">
-        {loading ? (
+        {loading || gastosLoading ? (
           <p className="text-slate-500 text-center py-12">Cargando datos del día...</p>
         ) : (
           <>
@@ -173,6 +176,20 @@ export function CierreView() {
                   {numeroPedidos} pedidos · Ticket medio {ticketMedio.toFixed(2)}€
                 </p>
               </div>
+              {totalGastos > 0 && (
+                <div className="bg-slate-800 border border-red-500/30 rounded-xl p-4">
+                  <p className="text-slate-400 text-xs font-bold uppercase mb-1">Gastos del día</p>
+                  <p className="text-red-400 font-black text-2xl">-{totalGastos.toFixed(2)}€</p>
+                </div>
+              )}
+              {totalGastos > 0 && (
+                <div className="bg-slate-800 border border-emerald-500/30 rounded-xl p-4">
+                  <p className="text-slate-400 text-xs font-bold uppercase mb-1">Beneficio neto</p>
+                  <p className={`font-black text-2xl ${(totalIngresos - totalGastos) >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                    {(totalIngresos - totalGastos).toFixed(2)}€
+                  </p>
+                </div>
+              )}
               {TODOS_METODOS.filter(m => (porMetodo[m] ?? 0) > 0).map(m => (
                 <div key={m} className="bg-slate-800 border border-slate-700 rounded-xl p-3">
                   <p className="text-slate-400 text-xs">{METODO_LABEL[m]}</p>

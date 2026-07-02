@@ -173,6 +173,7 @@ function FichajeGate({ user, onDone }: { user: AppUser; onDone: () => void }) {
       setTimeout(onDone, 2500);
     } catch (e) {
       console.error(e);
+      alert(e instanceof Error ? e.message : 'Error al registrar entrada.');
       setLoading(false);
     }
   };

@@ -26,8 +26,11 @@ export async function getOCrearConversacion(
   });
   if (existe) return existe.id;
 
-  await updateDoc(ref, {}).catch(async () => {
-    // No existe → crear
+  // Intentar update; si no existe, crear con setDoc
+  try {
+    await updateDoc(ref, {});
+  } catch {
+    // Documento no existe → crearlo
     const batch = writeBatch(db);
     batch.set(ref, {
       participantes: [uid1, uid2],
@@ -35,7 +38,7 @@ export async function getOCrearConversacion(
       noLeidos: { [uid1]: 0, [uid2]: 0 },
     } satisfies Omit<Conversacion, 'id' | 'ultimoMensaje' | 'ultimaFecha'>);
     await batch.commit();
-  });
+  }
 
   return convId;
 }

@@ -32,9 +32,13 @@ export async function getTurnoAbierto(usuarioId: string): Promise<Turno | null> 
 // ─── Registrar entrada ────────────────────────────────────────────────────────
 
 export async function registrarEntrada(usuarioId: string, nombre: string): Promise<void> {
-  const ahora     = new Date().toISOString();
-  const fecha     = hoyStr();
-  const hora      = horaStr();
+  // Verificar que no hay turno abierto antes de crear uno nuevo
+  const turnoExistente = await getTurnoAbierto(usuarioId);
+  if (turnoExistente) throw new Error('Ya tienes un turno abierto. Ficha la salida primero.');
+
+  const ahora = new Date().toISOString();
+  const fecha = hoyStr();
+  const hora  = horaStr();
 
   // Fichaje
   await addDoc(collection(db, 'fichajes'), {
