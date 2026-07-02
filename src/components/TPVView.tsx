@@ -872,7 +872,7 @@ function PedidoPanel({
           </div>
           {/* Categorías */}
           {!busqueda && (
-            <div className="flex overflow-x-auto gap-2 px-3 py-1.5 shrink-0 scrollbar-hide">
+            <div className="flex overflow-x-auto gap-2 px-3 py-1.5 shrink-0 scrollbar-hide overscroll-x-contain scroll-smooth">
               {categorias.map(cat => (
                 <button key={cat.id} onClick={() => setActiveCat(cat.id)}
                   className={`px-3 py-1.5 rounded-full text-xs font-bold whitespace-nowrap transition-colors shrink-0 ${

@@ -390,7 +390,7 @@ export function MesaDetalle({ mesa, pedido, categorias, productos, onClose }: Pr
       {tab === 'carta' && (
         <div className="flex-1 flex flex-col overflow-hidden">
           {/* Categorías */}
-          <div className="flex overflow-x-auto gap-2 px-3 py-2 shrink-0 bg-slate-800/50 border-b border-slate-700 scrollbar-hide">
+          <div className="flex overflow-x-auto gap-2 px-3 py-2 shrink-0 bg-slate-800/50 border-b border-slate-700 scrollbar-hide overscroll-x-contain scroll-smooth">
             {categorias.map(cat => (
               <button key={cat.id} onClick={() => setActiveCat(cat.id)}
                 className={`px-4 py-1.5 rounded-full text-sm font-bold whitespace-nowrap transition-colors shrink-0 ${
