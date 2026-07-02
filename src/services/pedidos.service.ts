@@ -36,6 +36,7 @@ export async function abrirMesa(
 }
 
 // ─── Añadir producto ─────────────────────────────────────────────────────────
+// Regla Firestore: TODAS las lecturas (t.get) ANTES de cualquier escritura (t.update/t.set)
 
 export async function agregarProducto(
   pedidoId: string,
@@ -48,53 +49,62 @@ export async function agregarProducto(
   const prodRef = producto.controlStock ? doc(db, 'productos', producto.id) : null;
 
   await runTransaction(db, async (t) => {
-    const snap = await t.get(pedidoRef);
-    if (!snap.exists()) throw new Error('Pedido no encontrado');
+    // ── FASE 1: TODAS LAS LECTURAS ────────────────────────────────────────────
+    const pedidoSnap = await t.get(pedidoRef);
+    const prodSnap   = prodRef ? await t.get(prodRef) : null;
 
-    // Read stock if needed (must precede all writes)
-    const prodSnap = prodRef ? await t.get(prodRef) : null;
+    // ── FASE 2: VALIDACIÓN Y CÁLCULO (solo memoria, sin red) ─────────────────
+    if (!pedidoSnap.exists()) throw new Error('Pedido no encontrado');
 
-    const data   = snap.data() as Omit<Pedido, 'id'>;
+    const data  = pedidoSnap.data() as Omit<Pedido, 'id'>;
     const lineas: LineaPedido[] = [...(data.lineas ?? [])];
 
-    const idx = lineas.findIndex(l => l.productoId === producto.id && (l.notas ?? '') === notas);
+    const idx = lineas.findIndex(
+      l => l.productoId === producto.id && (l.notas ?? '') === notas,
+    );
     if (idx >= 0) {
       lineas[idx] = { ...lineas[idx], cantidad: lineas[idx].cantidad + 1 };
     } else {
       lineas.push({
-        id:           `l-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-        productoId:   producto.id,
-        nombre:       producto.nombre,
-        precio:       producto.precio,
-        cantidad:     1,
-        estado:       'pendiente',
+        id:          `l-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+        productoId:  producto.id,
+        nombre:      producto.nombre,
+        precio:      producto.precio,
+        cantidad:    1,
+        estado:      'pendiente',
         destino,
         tipoIva,
         controlStock: producto.controlStock ?? false,
         ...(notas ? { notas } : {}),
       });
     }
-
     const total = round2(lineas.reduce((s, l) => s + l.precio * l.cantidad, 0));
-    t.update(pedidoRef, { lineas, total });
 
-    // Decrement stock
+    // Calcular cambios de stock en memoria
+    let prodUpdate: Record<string, unknown> | null = null;
+    let nuevoStock = 0;
     if (prodRef && prodSnap?.exists()) {
       const stockActual = (prodSnap.data()['stockActual'] as number) ?? 0;
       if (stockActual <= 0) throw new Error('STOCK_AGOTADO');
-      const nuevoStock = stockActual - 1;
-      const prodUpdate: Record<string, unknown> = { stockActual: nuevoStock };
+      nuevoStock = stockActual - 1;
+      prodUpdate = {
+        stockActual: nuevoStock,
+        ...(nuevoStock === 0 ? { disponible: false } : {}),
+      };
+    }
+
+    // ── FASE 3: TODAS LAS ESCRITURAS ─────────────────────────────────────────
+    t.update(pedidoRef, { lineas, total });
+
+    if (prodRef && prodUpdate) {
       if (nuevoStock === 0) {
-        prodUpdate['disponible'] = false;
-        const notifRef = doc(collection(db, 'notificaciones'));
-        t.set(notifRef, {
+        t.set(doc(collection(db, 'notificaciones')), {
           tipo: 'stock_agotado', productoId: producto.id,
           productoNombre: producto.nombre, stockActual: 0,
           leido: false, createdAt: new Date().toISOString(),
         });
       } else if (nuevoStock === 3) {
-        const notifRef = doc(collection(db, 'notificaciones'));
-        t.set(notifRef, {
+        t.set(doc(collection(db, 'notificaciones')), {
           tipo: 'stock_bajo', productoId: producto.id,
           productoNombre: producto.nombre, stockActual: nuevoStock,
           leido: false, createdAt: new Date().toISOString(),
@@ -111,35 +121,46 @@ export async function quitarProducto(pedidoId: string, lineaId: string): Promise
   const pedidoRef = doc(db, 'pedidos', pedidoId);
 
   await runTransaction(db, async (t) => {
-    const snap = await t.get(pedidoRef);
-    if (!snap.exists()) return;
+    // ── FASE 1: LECTURA PEDIDO ───────────────────────────────────────────────
+    const pedidoSnap = await t.get(pedidoRef);
+    if (!pedidoSnap.exists()) return;
 
-    const data = snap.data() as Omit<Pedido, 'id'>;
-    let lineas: LineaPedido[] = [...(data.lineas ?? [])];
-    const idx = lineas.findIndex(l => l.id === lineaId);
+    const data = pedidoSnap.data() as Omit<Pedido, 'id'>;
+    const lineasOrig: LineaPedido[] = [...(data.lineas ?? [])];
+    const idx = lineasOrig.findIndex(l => l.id === lineaId);
     if (idx < 0) return;
 
-    const linea = lineas[idx];
+    // Determinar si se necesita leer el producto (para stock)
+    const linea   = lineasOrig[idx];
     const prodRef = linea.controlStock ? doc(db, 'productos', linea.productoId) : null;
 
-    // Read stock before any writes
+    // ── FASE 1b: LECTURA PRODUCTO (si procede) — ANTES de cualquier escritura ─
     const prodSnap = prodRef ? await t.get(prodRef) : null;
 
+    // ── FASE 2: CÁLCULO EN MEMORIA ───────────────────────────────────────────
+    let lineas = lineasOrig;
     if (lineas[idx].cantidad > 1) {
-      lineas[idx] = { ...lineas[idx], cantidad: lineas[idx].cantidad - 1 };
+      lineas = lineas.map((l, i) =>
+        i === idx ? { ...l, cantidad: l.cantidad - 1 } : l,
+      );
     } else {
       lineas = lineas.filter(l => l.id !== lineaId);
     }
-
     const total = round2(lineas.reduce((s, l) => s + l.precio * l.cantidad, 0));
-    t.update(pedidoRef, { lineas, total });
 
-    // Restore stock
+    let prodUpdate: Record<string, unknown> | null = null;
     if (prodRef && prodSnap?.exists()) {
       const stockActual = (prodSnap.data()['stockActual'] as number) ?? 0;
       const nuevoStock  = stockActual + 1;
-      const prodUpdate: Record<string, unknown> = { stockActual: nuevoStock };
-      if (stockActual === 0) prodUpdate['disponible'] = true;
+      prodUpdate = {
+        stockActual: nuevoStock,
+        ...(stockActual === 0 ? { disponible: true } : {}),
+      };
+    }
+
+    // ── FASE 3: TODAS LAS ESCRITURAS ─────────────────────────────────────────
+    t.update(pedidoRef, { lineas, total });
+    if (prodRef && prodUpdate) {
       t.update(prodRef, prodUpdate);
     }
   });
@@ -232,25 +253,30 @@ export async function marcarLineaLista(pedidoId: string, lineaId: string): Promi
   const pedidoRef = doc(db, 'pedidos', pedidoId);
 
   await runTransaction(db, async (t) => {
+    // ── FASE 1: LECTURA ──────────────────────────────────────────────────────
     const snap = await t.get(pedidoRef);
     if (!snap.exists()) return;
 
-    const data = snap.data() as Omit<Pedido, 'id'>;
+    // ── FASE 2: CÁLCULO ──────────────────────────────────────────────────────
+    const data  = snap.data() as Omit<Pedido, 'id'>;
     const lineas = data.lineas.map(l =>
       l.id === lineaId ? { ...l, estado: 'listo' as const } : l,
     );
 
-    // Notificar solo cuando TODAS las líneas de cocina (y ambos) están listas
     const lineasCocina = lineas.filter(
       l => l.destino === 'cocina' || l.destino === 'ambos' || !l.destino,
     );
-    const todasCocinaListas = lineasCocina.length > 0 && lineasCocina.every(l => l.estado === 'listo' || l.estado === 'servido');
-    const updates: Record<string, unknown> = { lineas };
+    const todasListas = lineasCocina.length > 0
+      && lineasCocina.every(l => l.estado === 'listo' || l.estado === 'servido');
 
-    if (todasCocinaListas && data.estado === 'en_cocina') {
+    const updates: Record<string, unknown> = { lineas };
+    if (todasListas && data.estado === 'en_cocina') {
       updates['estado'] = 'listo';
-      const notifRef = doc(collection(db, 'notificaciones'));
-      t.set(notifRef, {
+    }
+
+    // ── FASE 3: ESCRITURAS ───────────────────────────────────────────────────
+    if (todasListas && data.estado === 'en_cocina') {
+      t.set(doc(collection(db, 'notificaciones')), {
         tipo:       'pedido_listo',
         mesaId:     data.mesaId,
         pedidoId,
@@ -259,22 +285,32 @@ export async function marcarLineaLista(pedidoId: string, lineaId: string): Promi
         createdAt:  new Date().toISOString(),
       });
     }
-
     t.update(pedidoRef, updates);
   });
 }
 
 // ─── Actualizar nota de una línea ────────────────────────────────────────────
 
-export async function actualizarNotaLinea(pedidoId: string, lineaId: string, notas: string): Promise<void> {
+export async function actualizarNotaLinea(
+  pedidoId: string,
+  lineaId: string,
+  notas: string,
+): Promise<void> {
   const pedidoRef = doc(db, 'pedidos', pedidoId);
   await runTransaction(db, async (t) => {
+    // ── FASE 1: LECTURA ──────────────────────────────────────────────────────
     const snap = await t.get(pedidoRef);
     if (!snap.exists()) return;
-    const data = snap.data() as Omit<Pedido, 'id'>;
+
+    // ── FASE 2: CÁLCULO ──────────────────────────────────────────────────────
+    const data  = snap.data() as Omit<Pedido, 'id'>;
     const lineas = data.lineas.map(l =>
-      l.id === lineaId ? { ...l, notas: notas || undefined } : l,
+      l.id === lineaId
+        ? { ...l, ...(notas ? { notas } : { notas: undefined }) }
+        : l,
     );
+
+    // ── FASE 3: ESCRITURA ────────────────────────────────────────────────────
     t.update(pedidoRef, { lineas });
   });
 }
@@ -284,12 +320,17 @@ export async function actualizarNotaLinea(pedidoId: string, lineaId: string, not
 export async function marcarLineaServida(pedidoId: string, lineaId: string): Promise<void> {
   const pedidoRef = doc(db, 'pedidos', pedidoId);
   await runTransaction(db, async (t) => {
+    // ── FASE 1: LECTURA ──────────────────────────────────────────────────────
     const snap = await t.get(pedidoRef);
     if (!snap.exists()) return;
-    const data = snap.data() as Omit<Pedido, 'id'>;
+
+    // ── FASE 2: CÁLCULO ──────────────────────────────────────────────────────
+    const data  = snap.data() as Omit<Pedido, 'id'>;
     const lineas = data.lineas.map(l =>
       l.id === lineaId ? { ...l, estado: 'servido' as const } : l,
     );
+
+    // ── FASE 3: ESCRITURA ────────────────────────────────────────────────────
     t.update(pedidoRef, { lineas });
   });
 }
