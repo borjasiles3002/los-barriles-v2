@@ -217,10 +217,10 @@ function FichajeGate({ user, onDone }: { user: AppUser; onDone: () => void }) {
 function MonitorView({ route }: { route: 'cocina' | 'sala' | 'barra' }) {
   const { user, loading: authLoading } = useAuthContext();
   if (authLoading) return <FullScreenLoader />;
+  // /sala funciona sin login: monitor público con edición protegida por PIN
+  if (route === 'sala') return <SalaView />;
   if (!user)       return <LoginView />;
   if (route === 'cocina') return <KitchenView />;
-  if (route === 'sala')   return <SalaView />;
-  // /tpv → TPV completo con pedido íntegro, bebidas + cocina
   return <TPVView />;
 }
 

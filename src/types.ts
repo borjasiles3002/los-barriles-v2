@@ -81,7 +81,7 @@ export interface Tarea {
 // ─── Mesas & Pedidos ──────────────────────────────────────────────────────────
 
 export type MesaEstado    = 'libre' | 'ocupada' | 'cuenta_pedida';
-export type PedidoEstado  = 'abierto' | 'en_cocina' | 'listo' | 'cuenta_pedida' | 'cerrado';
+export type PedidoEstado  = 'abierto' | 'en_cocina' | 'listo' | 'cuenta_pedida' | 'cerrado' | 'cancelado';
 export type LineaEstado   = 'pendiente' | 'en_preparacion' | 'listo' | 'servido';
 export type DestinoProducto = 'barra' | 'cocina' | 'ambos';
 export type TipoIva = 'reducido' | 'superreducido' | 'normal';
@@ -129,6 +129,10 @@ export interface Pedido {
   camareroNombre?: string;
   clienteId?: string;
   clienteNombre?: string;
+  canceladoAt?: string;
+  canceladoPor?: string;
+  canceladoNombre?: string;
+  canceladoMotivo?: string;
 }
 
 // ─── Carta ────────────────────────────────────────────────────────────────────

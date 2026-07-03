@@ -30,6 +30,7 @@ const ESTADO_LABELS: Record<PedidoEstado, string> = {
   listo:         'Listo',
   cuenta_pedida: 'Cuenta pedida',
   cerrado:       'Cerrado',
+  cancelado:     'Cancelado',
 };
 
 const ESTADO_COLORS: Record<PedidoEstado, string> = {
@@ -38,6 +39,7 @@ const ESTADO_COLORS: Record<PedidoEstado, string> = {
   listo:         'bg-emerald-500',
   cuenta_pedida: 'bg-red-500',
   cerrado:       'bg-slate-500',
+  cancelado:     'bg-red-900',
 };
 
 const METODOS_PAGO: { key: MetodoPago; label: string; icon: string }[] = [

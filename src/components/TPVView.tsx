@@ -16,7 +16,10 @@ import {
   cambiarEstadoPedido, cerrarPedido, pedirCuenta,
   asignarClienteAPedido, actualizarNotaLinea,
   marcarNotificacionLeida, marcarTodasLeidas,
+  vaciarMesa, eliminarMesa, actualizarNombreMesa,
 } from '../services/pedidos.service';
+import { addDoc, collection } from 'firebase/firestore';
+import { db } from '../firebase';
 import { registrarIngreso }              from '../services/ingresos.service';
 import { buscarClientes, crearCliente, registrarVisitaCliente } from '../services/clientes.service';
 import {
@@ -27,6 +30,196 @@ import { StockBadge }         from './AperturaView';
 import { useProductosStock }  from '../hooks/useStock';
 import { useColaImpresion }   from '../hooks/useColaImpresion';
 import { encolarImpresion }   from '../services/impresion.service';
+import { getTrabajadorPorPin } from '../services/personal.service';
+
+// ─── VaciarMesaModal ─────────────────────────────────────────────────────────
+
+function VaciarMesaModal({
+  mesa, pedido, user, onConfirm, onClose,
+}: {
+  mesa: Mesa; pedido: Pedido;
+  user: { uid: string; nombre: string; role: string } | null;
+  onConfirm: () => Promise<void>; onClose: () => void;
+}) {
+  const [pin, setPin]           = useState('');
+  const [pinError, setPinError] = useState('');
+  const [pinOk, setPinOk]       = useState(false);
+  const [loading, setLoading]   = useState(false);
+
+  const needsPin = user ? !['gerente', 'admin', 'manager'].includes(user.role) : true;
+
+  const handleVerifyPin = async () => {
+    if (pin.length !== 4) { setPinError('El PIN debe tener 4 dígitos'); return; }
+    setLoading(true);
+    setPinError('');
+    try {
+      const found = await getTrabajadorPorPin(pin);
+      if (!found || !['gerente', 'admin', 'manager'].includes(found.role)) {
+        setPinError('PIN incorrecto o sin permisos');
+        setPin('');
+      } else {
+        setPinOk(true);
+      }
+    } catch { setPinError('Error al verificar. Comprueba la conexión.'); }
+    finally { setLoading(false); }
+  };
+
+  const handleConfirm = async () => {
+    setLoading(true);
+    try { await onConfirm(); }
+    finally { setLoading(false); }
+  };
+
+  const totalProd = pedido.lineas.reduce((s, l) => s + l.cantidad, 0);
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm">
+      <div className="bg-slate-800 rounded-2xl p-6 w-80 shadow-2xl border border-red-900 space-y-4">
+        {(!needsPin || pinOk) ? (
+          <>
+            <div className="text-center">
+              <span className="text-4xl">⚠️</span>
+              <h2 className="text-white font-black text-lg mt-2">¿Vaciar {mesa.nombre}?</h2>
+              <p className="text-slate-400 text-sm mt-1">
+                Se cancelará el pedido actual<br />
+                <span className="text-red-400 font-bold">{totalProd} productos · {pedido.total.toFixed(2)}€</span>
+              </p>
+              <p className="text-slate-500 text-xs mt-2">Esta acción no se puede deshacer</p>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <button onClick={onClose} disabled={loading}
+                className="py-3 bg-slate-700 hover:bg-slate-600 text-white font-bold rounded-xl transition">
+                Cancelar
+              </button>
+              <button onClick={() => void handleConfirm()} disabled={loading}
+                className="py-3 bg-red-600 hover:bg-red-500 text-white font-black rounded-xl transition disabled:opacity-60">
+                {loading ? '…' : 'Sí, vaciar'}
+              </button>
+            </div>
+          </>
+        ) : (
+          <>
+            <div className="text-center">
+              <span className="text-4xl">🔐</span>
+              <h2 className="text-white font-black text-lg mt-2">PIN de gerencia</h2>
+              <p className="text-slate-400 text-xs mt-1">Necesario para vaciar mesas</p>
+            </div>
+            <input
+              autoFocus type="password" inputMode="numeric" maxLength={4}
+              value={pin} onChange={e => { setPin(e.target.value.replace(/\D/g, '')); setPinError(''); }}
+              onKeyDown={e => { if (e.key === 'Enter') void handleVerifyPin(); }}
+              placeholder="● ● ● ●"
+              className="w-full text-center text-3xl tracking-[1rem] bg-slate-700 text-white rounded-xl px-4 py-4 focus:outline-none focus:ring-2 focus:ring-red-500"
+            />
+            {pinError && <p className="text-red-400 text-xs text-center">{pinError}</p>}
+            <div className="grid grid-cols-2 gap-3">
+              <button onClick={onClose} className="py-3 bg-slate-700 text-white font-bold rounded-xl">Cancelar</button>
+              <button onClick={() => void handleVerifyPin()} disabled={loading || pin.length !== 4}
+                className="py-3 bg-amber-500 text-black font-black rounded-xl disabled:opacity-50">
+                {loading ? '…' : 'Continuar'}
+              </button>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ─── GestionMesasModal ────────────────────────────────────────────────────────
+
+function GestionMesasModal({ mesas, onClose }: { mesas: Mesa[]; onClose: () => void }) {
+  const [renamingId, setRenamingId] = useState<string | null>(null);
+  const [draftName,  setDraftName]  = useState('');
+  const [loading,    setLoading]    = useState<string | null>(null);
+
+  const handleRename = async (mesaId: string) => {
+    if (!draftName.trim()) return;
+    setLoading(mesaId);
+    try { await actualizarNombreMesa(mesaId, draftName.trim()); }
+    catch (e) { console.error(e); }
+    finally { setLoading(null); setRenamingId(null); }
+  };
+
+  const handleDelete = async (mesa: Mesa) => {
+    if (mesa.estado !== 'libre') { alert(`${mesa.nombre} tiene un pedido activo.`); return; }
+    if (!window.confirm(`¿Eliminar ${mesa.nombre}?`)) return;
+    setLoading(mesa.id);
+    try { await eliminarMesa(mesa.id); }
+    catch (e) { console.error(e); }
+    finally { setLoading(null); }
+  };
+
+  const handleAdd = async () => {
+    const nombre = window.prompt('Nombre de la nueva mesa:', `Mesa ${mesas.length + 1}`);
+    if (!nombre?.trim()) return;
+    try {
+      await addDoc(collection(db, 'mesas'), {
+        numero: mesas.length + 1, nombre: nombre.trim(),
+        estado: 'libre', pedidoActivo: null, posX: 50, posY: 50,
+      });
+    } catch (e) { console.error(e); }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-end bg-black/70 backdrop-blur-sm" onClick={onClose}>
+      <div className="w-full max-h-[80vh] bg-slate-800 rounded-t-2xl p-5 space-y-3 overflow-y-auto"
+        onClick={e => e.stopPropagation()}>
+        <div className="flex items-center justify-between mb-1">
+          <h2 className="text-white font-black text-lg">🗺️ Gestionar mesas</h2>
+          <button onClick={onClose} className="text-slate-400 hover:text-white text-xl">✕</button>
+        </div>
+        <p className="text-slate-500 text-xs">Para mover mesas usa el monitor de sala (/sala → 🔧 Editar)</p>
+        <div className="space-y-2">
+          {mesas.map(mesa => (
+            <div key={mesa.id} className="flex items-center gap-3 bg-slate-700 rounded-xl px-3 py-2.5">
+              <span className={`w-2.5 h-2.5 rounded-full shrink-0 ${
+                mesa.estado === 'libre' ? 'bg-slate-500' :
+                mesa.estado === 'cuenta_pedida' ? 'bg-red-400' : 'bg-amber-400'
+              }`} />
+              {renamingId === mesa.id ? (
+                <input autoFocus value={draftName}
+                  onChange={e => setDraftName(e.target.value)}
+                  onKeyDown={e => { if (e.key === 'Enter') void handleRename(mesa.id); if (e.key === 'Escape') setRenamingId(null); }}
+                  className="flex-1 bg-slate-600 text-white rounded-lg px-2 py-1 text-sm focus:outline-none"
+                />
+              ) : (
+                <span className="flex-1 text-white font-semibold text-sm">{mesa.nombre}</span>
+              )}
+              {loading === mesa.id ? (
+                <LoadingSpinner size={4} />
+              ) : renamingId === mesa.id ? (
+                <div className="flex gap-1">
+                  <button onClick={() => void handleRename(mesa.id)}
+                    className="px-2 py-1 bg-emerald-600 text-white text-xs rounded-lg font-bold">✓</button>
+                  <button onClick={() => setRenamingId(null)}
+                    className="px-2 py-1 bg-slate-600 text-white text-xs rounded-lg">✕</button>
+                </div>
+              ) : (
+                <div className="flex gap-1">
+                  <button onClick={() => { setRenamingId(mesa.id); setDraftName(mesa.nombre); }}
+                    className="px-2 py-1 bg-slate-600 hover:bg-slate-500 text-slate-300 text-xs rounded-lg transition">
+                    ✏️
+                  </button>
+                  {mesa.estado === 'libre' && (
+                    <button onClick={() => void handleDelete(mesa)}
+                      className="px-2 py-1 bg-red-900/60 hover:bg-red-700 text-red-300 text-xs rounded-lg transition">
+                      🗑
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+        <button onClick={() => void handleAdd()}
+          className="w-full py-3 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl transition">
+          ＋ Nueva mesa
+        </button>
+      </div>
+    </div>
+  );
+}
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -602,7 +795,7 @@ function NotificacionesDrawer({
 
 function PedidoPanel({
   mesa, pedido, categorias, productos, onClose,
-  onShowCobro,
+  onShowCobro, onVaciar,
 }: {
   mesa: Mesa;
   pedido: Pedido;
@@ -610,6 +803,7 @@ function PedidoPanel({
   productos: Producto[];
   onClose: () => void;
   onShowCobro: () => void;
+  onVaciar: () => void;
 }) {
   const [showCarta,    setShowCarta]    = useState(false);
   const [activeCat,    setActiveCat]    = useState(categorias[0]?.id ?? '');
@@ -1072,6 +1266,11 @@ function PedidoPanel({
             </button>
           )}
         </div>
+        {/* Vaciar mesa */}
+        <button onClick={onVaciar}
+          className="w-full py-2 border border-red-800/60 hover:bg-red-900/30 text-red-500 hover:text-red-400 font-semibold rounded-xl text-xs transition-all">
+          🗑 Vaciar mesa
+        </button>
       </div>
     </div>
   );
@@ -1263,6 +1462,8 @@ export function TPVView() {
   const [showCobro,        setShowCobro]         = useState(false);
   const [showCierre,       setShowCierre]        = useState(false);
   const [showNotif,        setShowNotif]         = useState(false);
+  const [showGestionMesas, setShowGestionMesas]  = useState(false);
+  const [showVaciarMesa,   setShowVaciarMesa]    = useState(false);
   const [clienteSelec,     setClienteSelec]      = useState<Cliente | null>(null);
 
   // Pedido de la mesa seleccionada en tiempo real (viene de usePedidos)
@@ -1342,6 +1543,20 @@ export function TPVView() {
     }
   };
 
+  const handleVaciarMesa = async () => {
+    if (!selectedPedido || !selectedMesa) return;
+    const pedidoSnap = { ...selectedPedido };
+    const mesaSnap   = { ...selectedMesa };
+    setShowVaciarMesa(false);
+    setSelectedMesaId(null);
+    try {
+      await vaciarMesa(pedidoSnap.id, mesaSnap.id, user?.uid ?? '', user?.nombre ?? 'Desconocido');
+    } catch (e) {
+      console.error('Error al vaciar mesa:', e);
+      alert('Error al vaciar la mesa. Comprueba la conexión.');
+    }
+  };
+
   // Keyboard shortcuts
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -1368,6 +1583,16 @@ export function TPVView() {
       {/* ── Modals ── */}
       {comensalesModal && (
         <ComensalesModal mesa={comensalesModal} onConfirm={handleOpenMesa} onCancel={() => setComensalesModal(null)} />
+      )}
+      {showVaciarMesa && selectedPedido && selectedMesa && (
+        <VaciarMesaModal
+          mesa={selectedMesa} pedido={selectedPedido} user={user}
+          onConfirm={handleVaciarMesa}
+          onClose={() => setShowVaciarMesa(false)}
+        />
+      )}
+      {showGestionMesas && (
+        <GestionMesasModal mesas={mesas} onClose={() => setShowGestionMesas(false)} />
       )}
       {showCobro && selectedPedido && selectedMesa && (
         <CobroModal
@@ -1405,6 +1630,14 @@ export function TPVView() {
           </div>
         </div>
         <div className="flex items-center gap-2">
+          {/* Gestionar mesas (solo gerente/admin/manager) */}
+          {user && ['gerente', 'admin', 'manager'].includes(user.role) && (
+            <button onClick={() => setShowGestionMesas(s => !s)}
+              className="p-2 rounded-lg bg-slate-700 text-slate-300 hover:bg-slate-600 transition"
+              title="Gestionar mesas">
+              <span className="text-lg">🗺️</span>
+            </button>
+          )}
           {/* Notificaciones */}
           <button onClick={() => setShowNotif(s => !s)}
             className={`relative p-2 rounded-lg transition ${showNotif ? 'bg-amber-500' : 'bg-slate-700 text-slate-300 hover:bg-slate-600'}`}>
@@ -1481,6 +1714,7 @@ export function TPVView() {
               productos={productos}
               onClose={() => setSelectedMesaId(null)}
               onShowCobro={() => setShowCobro(true)}
+              onVaciar={() => setShowVaciarMesa(true)}
             />
           ) : selectedMesa && !selectedPedido ? (
             /* Mesa seleccionada pero sin pedido activo aún (raro) */

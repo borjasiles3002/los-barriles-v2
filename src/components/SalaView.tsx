@@ -5,9 +5,9 @@ import {
   actualizarPosicionMesa, actualizarNombreMesa,
   pedirCuenta, marcarLineaServida, eliminarMesa,
 } from '../services/pedidos.service';
+import { getTrabajadorPorPin } from '../services/personal.service';
 import { addDoc, collection, onSnapshot, doc } from 'firebase/firestore';
 import { db } from '../firebase';
-import { useAuthContext } from '../contexts/AuthContext';
 import { FullScreenLoader } from './ui/LoadingSpinner';
 import type { Mesa, Pedido, LineaPedido } from '../types';
 
@@ -284,20 +284,79 @@ function MesaCard({
   );
 }
 
+// ─── PIN modal para desbloquear edición ──────────────────────────────────────
+
+function PinEditModal({ onSuccess, onClose }: { onSuccess: () => void; onClose: () => void }) {
+  const [pin, setPin]       = useState('');
+  const [error, setError]   = useState('');
+  const [loading, setLoading] = useState(false);
+
+  const handleVerify = async () => {
+    if (pin.length !== 4) { setError('El PIN debe tener 4 dígitos'); return; }
+    setLoading(true);
+    setError('');
+    try {
+      const user = await getTrabajadorPorPin(pin);
+      if (!user || !['gerente', 'admin', 'manager'].includes(user.role)) {
+        setError('PIN incorrecto o sin permisos de edición');
+        setPin('');
+      } else {
+        onSuccess();
+      }
+    } catch {
+      setError('Error al verificar PIN. Comprueba la conexión.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm">
+      <div className="bg-slate-800 rounded-2xl p-6 w-72 shadow-2xl border border-slate-700 space-y-4">
+        <div className="text-center">
+          <span className="text-4xl">🔐</span>
+          <h2 className="text-white font-black text-lg mt-2">PIN de gerencia</h2>
+          <p className="text-slate-400 text-xs mt-1">Introduce el PIN de gerente o manager</p>
+        </div>
+        <input
+          autoFocus
+          type="password"
+          inputMode="numeric"
+          maxLength={4}
+          value={pin}
+          onChange={e => { setPin(e.target.value.replace(/\D/g, '')); setError(''); }}
+          onKeyDown={e => { if (e.key === 'Enter') void handleVerify(); }}
+          placeholder="● ● ● ●"
+          className="w-full text-center text-3xl tracking-[1rem] bg-slate-700 text-white rounded-xl px-4 py-4 focus:outline-none focus:ring-2 focus:ring-amber-500"
+        />
+        {error && <p className="text-red-400 text-xs text-center font-semibold">{error}</p>}
+        <div className="grid grid-cols-2 gap-3">
+          <button onClick={onClose}
+            className="py-3 bg-slate-700 hover:bg-slate-600 text-white font-bold rounded-xl transition">
+            Cancelar
+          </button>
+          <button onClick={() => void handleVerify()} disabled={loading || pin.length !== 4}
+            className="py-3 bg-amber-500 hover:bg-amber-400 text-black font-black rounded-xl transition disabled:opacity-50">
+            {loading ? '…' : 'Entrar'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── SalaView principal ───────────────────────────────────────────────────────
 
 export function SalaView() {
-  const { user }                          = useAuthContext();
   const { mesas, loading: mLoading }     = useMesas();
   const { pedidos, loading: pLoading }   = usePedidos(['abierto', 'en_cocina', 'listo', 'cuenta_pedida']);
   const [editMode, setEditMode]           = useState(false);
+  const [showPinModal, setShowPinModal]   = useState(false);
   const [positions, setPositions]         = useState<Record<string, { x: number; y: number }>>({});
   const [draggingId, setDraggingId]       = useState<string | null>(null);
   const [selectedMesaId, setSelectedMesaId] = useState<string | null>(null);
   const containerRef                      = useRef<HTMLDivElement>(null);
   const dragOffset                        = useRef({ dx: 0, dy: 0 });
-
-  const canEdit = user?.role === 'admin' || user?.role === 'manager';
   const loading = mLoading || pLoading;
 
   const pedidoByMesa: Record<string, Pedido> = {};
@@ -395,6 +454,14 @@ export function SalaView() {
 
   return (
     <div className="flex flex-col h-screen bg-slate-950 overflow-hidden">
+      {/* PIN modal edición */}
+      {showPinModal && (
+        <PinEditModal
+          onSuccess={() => { setShowPinModal(false); setEditMode(true); }}
+          onClose={() => setShowPinModal(false)}
+        />
+      )}
+
       {/* Header */}
       <div className="shrink-0 bg-slate-900 border-b border-slate-700 px-4 md:px-6 py-3">
         <div className="flex items-center justify-between">
@@ -417,21 +484,25 @@ export function SalaView() {
             </div>
           </div>
           <div className="flex items-center gap-3">
-            {canEdit && (
+            {editMode ? (
               <div className="flex gap-2">
-                {editMode && (
-                  <button onClick={handleAddMesa}
-                    className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold rounded-xl">
-                    ＋ Mesa
-                  </button>
-                )}
-                <button
-                  onClick={() => setEditMode(v => !v)}
-                  className={`px-3 py-1.5 text-xs font-bold rounded-xl transition-colors ${editMode ? 'bg-amber-500 text-black' : 'bg-slate-700 text-slate-300 hover:bg-slate-600'}`}
-                >
-                  {editMode ? '✓ Guardar mapa' : '✏️ Editar mapa'}
+                <button onClick={handleAddMesa}
+                  className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold rounded-xl">
+                  ＋ Mesa
+                </button>
+                <button onClick={() => setEditMode(false)}
+                  className="px-3 py-1.5 bg-amber-500 text-black text-xs font-black rounded-xl">
+                  ✓ Guardar y salir
                 </button>
               </div>
+            ) : (
+              <button
+                onClick={() => setShowPinModal(true)}
+                className="px-3 py-1.5 text-xs font-bold rounded-xl bg-slate-700/60 text-slate-500 hover:text-slate-300 hover:bg-slate-700 transition-colors"
+                title="Editar mapa (requiere PIN de gerencia)"
+              >
+                🔧 Editar
+              </button>
             )}
             <Clock />
           </div>

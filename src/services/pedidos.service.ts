@@ -341,6 +341,58 @@ export async function eliminarMesa(mesaId: string): Promise<void> {
   await deleteDoc(doc(db, 'mesas', mesaId));
 }
 
+// ─── Vaciar mesa (cancela pedido, devuelve stock, libera mesa) ───────────────
+
+export async function vaciarMesa(
+  pedidoId: string,
+  mesaId: string,
+  vaciadorId: string,
+  vaciadorNombre: string,
+): Promise<void> {
+  const pedidoRef = doc(db, 'pedidos', pedidoId);
+  const mesaRef   = doc(db, 'mesas', mesaId);
+
+  await runTransaction(db, async (t) => {
+    // ── FASE 1: TODAS LAS LECTURAS ────────────────────────────────────────────
+    const pedidoSnap = await t.get(pedidoRef);
+    if (!pedidoSnap.exists()) return;
+
+    const data   = pedidoSnap.data() as Omit<Pedido, 'id'>;
+    const lineas: LineaPedido[] = data.lineas ?? [];
+
+    const stockLineas = lineas.filter(l => l.controlStock && l.productoId);
+    const prodIds = [...new Set(stockLineas.map(l => l.productoId))];
+    const prodRefs = prodIds.map(id => doc(db, 'productos', id));
+    const prodSnaps = await Promise.all(prodRefs.map(r => t.get(r)));
+
+    // ── FASE 2: CÁLCULO ──────────────────────────────────────────────────────
+    const prodUpdates: { idx: number; stockActual: number; disponible: boolean }[] = [];
+    prodSnaps.forEach((snap, i) => {
+      if (!snap.exists()) return;
+      const productoId = prodIds[i];
+      const qty = stockLineas
+        .filter(l => l.productoId === productoId)
+        .reduce((s, l) => s + l.cantidad, 0);
+      const nuevoStock = ((snap.data()['stockActual'] as number) ?? 0) + qty;
+      prodUpdates.push({ idx: i, stockActual: nuevoStock, disponible: nuevoStock > 0 });
+    });
+
+    // ── FASE 3: TODAS LAS ESCRITURAS ─────────────────────────────────────────
+    const now = new Date().toISOString();
+    t.update(pedidoRef, {
+      estado:           'cancelado' as PedidoEstado,
+      canceladoAt:      now,
+      canceladoPor:     vaciadorId,
+      canceladoNombre:  vaciadorNombre,
+      canceladoMotivo:  'Mesa vaciada manualmente',
+    });
+    t.update(mesaRef, { estado: 'libre', pedidoActivo: null, comensales: null });
+    prodUpdates.forEach(({ idx, stockActual, disponible }) => {
+      t.update(prodRefs[idx], { stockActual, disponible });
+    });
+  });
+}
+
 // ─── Marcar notificación como leída ──────────────────────────────────────────
 
 export async function marcarNotificacionLeida(notifId: string): Promise<void> {
