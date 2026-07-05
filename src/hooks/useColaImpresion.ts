@@ -1,7 +1,6 @@
 /**
  * Escucha /colaImpresion en Firestore y ejecuta cada trabajo pendiente
- * a través de QZ Tray. Solo debe montarse en el TPV principal (el único
- * dispositivo con QZ Tray instalado y acceso a las impresoras físicas).
+ * a través de QZ Tray. Solo debe montarse en el TPV principal.
  */
 import { useEffect } from 'react';
 import {
@@ -11,14 +10,14 @@ import {
 import { db } from '../firebase';
 import type { ColaImpresion } from '../types';
 import {
-  conectarQZ, imprimirTrabajo, getConfigImpresoras,
+  conectarQZ, imprimirTrabajo, getConfigImpresoras, qzConectado,
 } from '../services/impresion.service';
 
 export function useColaImpresion(): void {
   useEffect(() => {
-    // Intentar conectar QZ Tray al montar
+    // Intentar conectar QZ Tray al montar (silencioso si no está disponible)
     void conectarQZ().catch(e =>
-      console.warn('[QZ Tray] No disponible (¿está ejecutándose?):', (e as Error).message ?? e),
+      console.info('[QZ Tray] No disponible al iniciar:', (e as Error).message ?? e),
     );
 
     const procesando = new Set<string>();
@@ -45,12 +44,20 @@ export function useColaImpresion(): void {
               : config.impresoraBarra;
 
             if (!impresora) {
+              console.warn(`[QZ] Sin impresora configurada para "${job.tipo}"`);
               await updateDoc(ref, {
                 estado:      'error',
-                errorMsg:    `Sin impresora configurada para "${job.tipo}"`,
+                errorMsg:    `Sin impresora configurada para tipo "${job.tipo}"`,
                 procesadoAt: new Date().toISOString(),
               });
               return;
+            }
+
+            // Reconectar QZ si se desconectó (p.ej. QZ Tray se reinició)
+            const activo = await qzConectado();
+            if (!activo) {
+              console.info('[QZ] Reconectando…');
+              await conectarQZ();
             }
 
             await imprimirTrabajo(job, impresora);
@@ -58,12 +65,13 @@ export function useColaImpresion(): void {
               estado:      'procesado',
               procesadoAt: new Date().toISOString(),
             });
+            console.info(`[QZ] Trabajo ${job.id} impreso en "${impresora}"`);
           } catch (e) {
             const msg = e instanceof Error ? e.message : String(e);
-            console.error('[impresion] Error al procesar trabajo:', msg, job);
+            console.error('[QZ] Error al procesar trabajo:', msg, job);
             await updateDoc(ref, {
               estado:      'error',
-              errorMsg:    msg.slice(0, 200),
+              errorMsg:    msg.slice(0, 300),
               procesadoAt: new Date().toISOString(),
             }).catch(() => {});
           } finally {

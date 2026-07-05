@@ -3,7 +3,7 @@
  *
  * Prerrequisitos en el TPV:
  *   1. Instalar QZ Tray desde https://qz.io/download/
- *   2. Abrirlo y activar "Allow unsigned" en Settings → Advanced
+ *   2. Abrirlo → botón derecho en bandeja → Advanced → marcar "Allow unsigned"
  *   3. La impresora térmica 80mm debe tener drivers instalados en Windows
  *
  * Flujo:
@@ -17,7 +17,7 @@ import {
 import { db } from '../firebase';
 import type { ColaImpresion, ConfigImpresoras, LineaPedido } from '../types';
 
-// ─── Interfaz mínima de QZ Tray para TypeScript ───────────────────────────────
+// ─── Interfaz mínima de QZ Tray ───────────────────────────────────────────────
 
 interface QzSecurity {
   setCertificatePromise(fn: (resolve: (cert?: string | null) => void, reject: (e?: unknown) => void) => void): void;
@@ -25,7 +25,7 @@ interface QzSecurity {
   setSignaturePromise(fn: (data: string) => (resolve: (sig?: string | null) => void, reject: (e?: unknown) => void) => void): void;
 }
 interface QzWebsocket {
-  connect(opts?: { host?: string; port?: number; usingSecure?: boolean }): Promise<void>;
+  connect(opts?: { host?: string; port?: { secure?: number[]; insecure?: number[] } | number; usingSecure?: boolean }): Promise<void>;
   disconnect(): Promise<void>;
   isActive(): boolean;
 }
@@ -47,10 +47,10 @@ async function getQZ(): Promise<Qz> {
   const mod = await import('qz-tray') as any;
   _qz = ((mod.default ?? mod) as Qz);
 
-  // Modo sin firma — QZ Tray debe tener activado "Allow unsigned" en Advanced
-  _qz.security.setCertificatePromise((_res, _rej) => { _res(); });
+  // Modo sin firma — requiere "Allow unsigned" en QZ Tray → botón derecho bandeja → Advanced
+  _qz.security.setCertificatePromise(resolve => { resolve(null); });
   _qz.security.setSignatureAlgorithm('SHA512');
-  _qz.security.setSignaturePromise(() => (res) => { res(); });
+  _qz.security.setSignaturePromise(() => resolve => { resolve(null); });
 
   return _qz;
 }
@@ -58,16 +58,16 @@ async function getQZ(): Promise<Qz> {
 // ─── ESC/POS helpers (impresora térmica 80mm, 48 chars/línea) ────────────────
 
 const ESC = '\x1B', GS = '\x1D', LF = '\x0A';
-const INIT        = `${ESC}\x40`;          // Inicializar
+const INIT        = `${ESC}\x40`;
 const BOLD_ON     = `${ESC}\x45\x01`;
 const BOLD_OFF    = `${ESC}\x45\x00`;
 const CENTER      = `${ESC}\x61\x01`;
 const LEFT        = `${ESC}\x61\x00`;
-const SIZE_4X     = `${ESC}\x21\x30`;      // Doble ancho + doble alto
-const SIZE_2H     = `${ESC}\x21\x10`;      // Doble alto
+const SIZE_4X     = `${ESC}\x21\x30`;
+const SIZE_2H     = `${ESC}\x21\x10`;
 const SIZE_NORMAL = `${ESC}\x21\x00`;
-const CUT         = `${GS}\x56\x00`;       // Corte completo
-const FEED_3      = `${ESC}\x64\x03`;      // Alimentar 3 líneas
+const CUT         = `${GS}\x56\x00`;
+const FEED_3      = `${ESC}\x64\x03`;
 
 const W = 48;
 
@@ -135,11 +135,20 @@ function buildTicket(job: ColaImpresion): string {
     CENTER, SIZE_2H, BOLD_ON,
     `TOTAL: ${fmtEur(total)}${LF}`,
     BOLD_OFF, SIZE_NORMAL,
-    `${centerText('¡Gracias por su visita!')}${LF}`,
+    `${centerText('Gracias por su visita!')}${LF}`,
     `${centerText('Los Barriles')}${LF}`,
     FEED_3,
     CUT,
   ].join('');
+}
+
+// Convierte una cadena de bytes ESC/POS a hex para envío seguro a QZ Tray
+function toHex(raw: string): string {
+  let hex = '';
+  for (let i = 0; i < raw.length; i++) {
+    hex += (raw.charCodeAt(i) & 0xFF).toString(16).padStart(2, '0');
+  }
+  return hex;
 }
 
 // ─── API pública ──────────────────────────────────────────────────────────────
@@ -147,7 +156,12 @@ function buildTicket(job: ColaImpresion): string {
 export async function conectarQZ(): Promise<void> {
   const qz = await getQZ();
   if (!qz.websocket.isActive()) {
-    await qz.websocket.connect({ host: 'localhost', port: 8182, usingSecure: false });
+    // Dejar que QZ Tray detecte el puerto automáticamente (8182 insecure por defecto)
+    await qz.websocket.connect({
+      host: 'localhost',
+      usingSecure: false,
+      port: { insecure: [8182, 8183, 8184] },
+    });
   }
 }
 
@@ -174,7 +188,7 @@ export async function imprimirPrueba(impresora: string): Promise<void> {
     pedidoId:   'test',
     lineas: [{
       id: 'l1', productoId: 'p1',
-      nombre: `Impresora OK — ${impresora}`,
+      nombre: `Impresora OK: ${impresora.slice(0, 30)}`,
       precio: 0, cantidad: 1, estado: 'pendiente', destino: 'barra',
     }],
     estado: 'pendiente', createdAt: new Date().toISOString(),
@@ -182,7 +196,8 @@ export async function imprimirPrueba(impresora: string): Promise<void> {
   const qz  = await getQZ();
   if (!qz.websocket.isActive()) await conectarQZ();
   const cfg = qz.configs.create(impresora);
-  await qz.print(cfg, [buildComanda(prueba)]);
+  const raw = buildComanda(prueba);
+  await qz.print(cfg, [{ type: 'raw', format: 'hex', data: toHex(raw) }]);
 }
 
 export async function imprimirTrabajo(job: ColaImpresion, impresora: string): Promise<void> {
@@ -190,7 +205,7 @@ export async function imprimirTrabajo(job: ColaImpresion, impresora: string): Pr
   if (!qz.websocket.isActive()) await conectarQZ();
   const raw = job.tipo === 'ticket' ? buildTicket(job) : buildComanda(job);
   const cfg = qz.configs.create(impresora);
-  await qz.print(cfg, [raw]);
+  await qz.print(cfg, [{ type: 'raw', format: 'hex', data: toHex(raw) }]);
 }
 
 // ─── Cola en Firestore (/colaImpresion) ───────────────────────────────────────

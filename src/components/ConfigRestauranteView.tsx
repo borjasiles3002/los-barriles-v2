@@ -1,5 +1,7 @@
 import { useState, useEffect } from 'react';
-import type { ConfigRestaurante, ConfigImpresoras } from '../types';
+import { collection, query, orderBy, limit, onSnapshot } from 'firebase/firestore';
+import { db } from '../firebase';
+import type { ConfigRestaurante, ConfigImpresoras, ColaImpresion } from '../types';
 import { getConfigRestaurante, saveConfigRestaurante } from '../services/facturasEmitidas.service';
 import {
   getConfigImpresoras, saveConfigImpresoras,
@@ -22,19 +24,29 @@ export function ConfigRestauranteView() {
   const [cfgImp,       setCfgImp]       = useState<ConfigImpresoras>({ impresoraCocina: '', impresoraBarra: '' });
   const [impresoras,   setImpresoras]   = useState<string[]>([]);
   const [qzStatus,     setQzStatus]     = useState<'desconocido' | 'conectado' | 'error'>('desconocido');
+  const [qzError,      setQzError]      = useState('');
   const [loadingQZ,    setLoadingQZ]    = useState(false);
   const [guardandoImp, setGuardandoImp] = useState(false);
   const [okImp,        setOkImp]        = useState(false);
   const [pruebaMsg,    setPruebaMsg]    = useState('');
+  const [colaJobs,     setColaJobs]     = useState<ColaImpresion[]>([]);
 
   useEffect(() => {
     getConfigRestaurante().then(c => { if (c) setConfig(c); setLoading(false); });
     getConfigImpresoras().then(c => setCfgImp(c));
     qzConectado().then(ok => setQzStatus(ok ? 'conectado' : 'desconocido'));
+
+    // Últimos 8 trabajos de la cola
+    const q = query(collection(db, 'colaImpresion'), orderBy('createdAt', 'desc'), limit(8));
+    const unsub = onSnapshot(q, snap => {
+      setColaJobs(snap.docs.map(d => ({ id: d.id, ...d.data() } as ColaImpresion)));
+    });
+    return () => unsub();
   }, []);
 
   const handleConectarQZ = async () => {
     setLoadingQZ(true);
+    setQzError('');
     try {
       await conectarQZ();
       const lista = await obtenerImpresoras();
@@ -42,7 +54,8 @@ export function ConfigRestauranteView() {
       setQzStatus('conectado');
     } catch (e) {
       setQzStatus('error');
-      alert('No se pudo conectar a QZ Tray.\n¿Está instalado y ejecutándose?\nhttps://qz.io/download/');
+      const msg = e instanceof Error ? e.message : String(e);
+      setQzError(msg);
     } finally { setLoadingQZ(false); }
   };
 
@@ -160,11 +173,14 @@ export function ConfigRestauranteView() {
           </span>
         </div>
 
-        <p className="text-slate-400 text-xs">
-          Requiere <a href="https://qz.io/download/" target="_blank" rel="noopener noreferrer"
-            className="text-amber-400 underline">QZ Tray</a> instalado y ejecutándose en el TPV.
-          Activar "Allow unsigned" en Settings → Advanced.
-        </p>
+        {/* Paso a paso */}
+        <div className="bg-slate-900/60 rounded-xl p-3 space-y-1 text-xs text-slate-400">
+          <p className="font-bold text-slate-300 mb-1">Pasos para configurar:</p>
+          <p>1. Abre QZ Tray (icono en la bandeja de Windows)</p>
+          <p>2. Clic derecho → <span className="text-amber-400 font-bold">Advanced</span> → marca <span className="text-amber-400 font-bold">Allow unsigned</span></p>
+          <p>3. Pulsa "Conectar QZ Tray" abajo y selecciona las impresoras</p>
+          <p>4. Haz una prueba de impresión y guarda</p>
+        </div>
 
         <button
           onClick={() => void handleConectarQZ()}
@@ -173,6 +189,16 @@ export function ConfigRestauranteView() {
         >
           {loadingQZ ? 'Conectando…' : qzStatus === 'conectado' ? '↻ Recargar impresoras' : '⚡ Conectar QZ Tray'}
         </button>
+
+        {qzError && (
+          <div className="bg-red-900/40 border border-red-700/60 rounded-xl p-3 text-xs space-y-1">
+            <p className="text-red-300 font-bold">Error de conexión:</p>
+            <p className="text-red-400 font-mono break-all">{qzError}</p>
+            <p className="text-slate-400 mt-1">
+              ¿QZ Tray está abierto? ¿Tienes marcado <strong className="text-amber-400">Allow unsigned</strong> en Advanced?
+            </p>
+          </div>
+        )}
 
         {/* Selector impresora cocina */}
         <div>
@@ -249,6 +275,35 @@ export function ConfigRestauranteView() {
         >
           {guardandoImp ? 'Guardando…' : okImp ? '✓ Guardado' : 'Guardar impresoras'}
         </button>
+
+        {/* ── Diagnóstico: últimos trabajos de la cola ── */}
+        {colaJobs.length > 0 && (
+          <div>
+            <p className="text-slate-400 text-xs font-bold uppercase mb-2">Últimos trabajos de impresión</p>
+            <div className="space-y-1">
+              {colaJobs.map(j => {
+                const estadoIcon  = j.estado === 'procesado' ? '✅' : j.estado === 'error' ? '❌' : '⏳';
+                const estadoColor = j.estado === 'procesado' ? 'text-emerald-400' : j.estado === 'error' ? 'text-red-400' : 'text-amber-400';
+                const hora = new Date(j.createdAt).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+                return (
+                  <div key={j.id} className="flex items-start gap-2 bg-slate-900/60 rounded-lg px-3 py-2 text-xs">
+                    <span>{estadoIcon}</span>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span className={`font-bold ${estadoColor}`}>{j.tipo.toUpperCase()}</span>
+                        <span className="text-slate-300">{j.mesaNombre}</span>
+                        <span className="text-slate-600">{hora}</span>
+                      </div>
+                      {j.estado === 'error' && j.errorMsg && (
+                        <p className="text-red-400 mt-0.5 font-mono break-all">{j.errorMsg}</p>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
