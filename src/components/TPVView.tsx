@@ -4,7 +4,6 @@ import type {
   Mesa, Pedido, Producto, Categoria, MetodoPago, Cliente,
   LineaPedido, Notificacion, Ingreso,
 } from '../types';
-import { IVA_RATES as IVA } from '../types';
 import { useMesas }          from '../hooks/useMesas';
 import { usePedidos }        from '../hooks/usePedidos';
 import { useCarta }          from '../hooks/useCarta';
@@ -380,156 +379,111 @@ function ComensalesModal({
 
 // ─── Cobro Modal ──────────────────────────────────────────────────────────────
 
+const METODOS_COBRO: { key: MetodoPago; label: string; icon: string }[] = [
+  { key: 'efectivo',   label: 'Efectivo',   icon: '💵' },
+  { key: 'tarjeta',    label: 'Tarjeta',    icon: '💳' },
+  { key: 'bizum',      label: 'Bizum',      icon: '📱' },
+  { key: 'invitacion', label: 'Invitación', icon: '🎁' },
+];
+
 function CobroModal({
-  pedido, mesa, cliente, onCobrar, onClose,
+  pedido, mesa, onCobrar, onClose,
 }: {
   pedido: Pedido;
   mesa: Mesa;
-  cliente: Cliente | null;
   onCobrar: (metodo: MetodoPago, total: number, emitirFactura: boolean, motivo?: string, imprimirTicket?: boolean) => Promise<void>;
   onClose: () => void;
 }) {
-  const [metodo,              setMetodo]              = useState<MetodoPago | null>(null);
-  const [efectivoRec,         setEfectivoRec]         = useState('');
-  const [personas,            setPersonas]            = useState(mesa.comensales ?? 2);
-  const [dividir,             setDividir]             = useState(false);
-  const [descuento,           setDescuento]           = useState(0);
-  const [motivoInvit,         setMotivoInvit]         = useState('');
-  const [emitirFact,          setEmitirFact]          = useState(false);
-  const [imprimirTicketTP,    setImprimirTicketTP]    = useState(true);
-  const [loading,             setLoading]             = useState(false);
+  const [metodo,      setMetodo]      = useState<MetodoPago | null>(null);
+  const [efectivoRec, setEfectivoRec] = useState('');
+  const [motivoInvit, setMotivoInvit] = useState('');
+  const [loading,     setLoading]     = useState(false);
 
-  const totalConDesc = pedido.total * (1 - descuento / 100);
-  const totalPorPers = dividir && personas > 0 ? totalConDesc / personas : null;
   const efectivoNum = parseFloat(efectivoRec);
   const cambio = metodo === 'efectivo' && efectivoRec && !isNaN(efectivoNum)
-    ? efectivoNum - totalConDesc
+    ? efectivoNum - pedido.total
     : null;
 
   const confirmar = async () => {
     if (!metodo) return;
     setLoading(true);
     try {
-      await onCobrar(metodo, totalConDesc, emitirFact, metodo === 'invitacion' ? motivoInvit : undefined, imprimirTicketTP);
+      await onCobrar(metodo, pedido.total, false, metodo === 'invitacion' ? motivoInvit : undefined, true);
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/75 backdrop-blur-sm p-4">
-      <div className="bg-slate-800 rounded-2xl w-full max-w-md border border-slate-700 shadow-2xl overflow-y-auto max-h-[90vh]">
-        <div className="p-5 border-b border-slate-700 flex items-center justify-between">
-          <h3 className="text-white font-black text-xl">Cobrar — {mesa.nombre}</h3>
+    <div
+      className="fixed inset-0 z-[60] flex items-center justify-center bg-black/75 backdrop-blur-sm p-4"
+      onClick={onClose}
+    >
+      <div
+        className="bg-slate-800 rounded-2xl w-full max-w-[480px] border border-slate-700 shadow-2xl"
+        onClick={e => e.stopPropagation()}
+      >
+        {/* Header */}
+        <div className="px-5 pt-5 pb-2 flex items-center justify-between">
+          <h3 className="text-white font-black text-lg">{mesa.nombre}</h3>
           <button onClick={onClose} className="text-slate-400 hover:text-white text-2xl leading-none">×</button>
         </div>
 
-        <div className="p-5 space-y-4">
-          {/* Total + descuento */}
-          <div className="bg-slate-900 rounded-xl p-4">
-            <div className="flex items-center gap-3 mb-3">
-              <span className="text-slate-400 text-sm flex-1">Descuento %</span>
-              <div className="flex items-center gap-1">
-                {[0, 5, 10, 15, 20].map(d => (
-                  <button key={d} onClick={() => setDescuento(d)}
-                    className={`w-10 h-8 rounded-lg text-xs font-bold transition ${descuento === d ? 'bg-amber-500 text-black' : 'bg-slate-700 text-slate-300 hover:bg-slate-600'}`}>
-                    {d > 0 ? `-${d}%` : 'Sin'}
-                  </button>
-                ))}
-              </div>
-            </div>
-            {descuento > 0 && (
-              <div className="flex justify-between text-sm mb-1">
-                <span className="text-slate-400">Original</span>
-                <span className="text-slate-400 line-through">{fmtEur(pedido.total)}</span>
-              </div>
-            )}
-            <div className="flex justify-between items-baseline">
-              <span className="text-slate-300 font-bold">Total a cobrar</span>
-              <span className="text-amber-400 font-black text-3xl">{fmtEur(totalConDesc)}</span>
-            </div>
-            {mesa.comensales && (
-              <p className="text-slate-500 text-xs mt-1 text-right">
-                {mesa.comensales} com. · {fmtEur(totalConDesc / mesa.comensales)}/persona
-              </p>
-            )}
-          </div>
-
-          {/* Dividir cuenta */}
-          <div className="flex items-center gap-3 bg-slate-700/50 rounded-xl px-4 py-3">
-            <button onClick={() => setDividir(d => !d)}
-              className={`w-10 h-6 rounded-full transition-colors flex items-center px-0.5 ${dividir ? 'bg-amber-500' : 'bg-slate-600'}`}>
-              <span className={`w-5 h-5 rounded-full bg-white shadow transition-transform ${dividir ? 'translate-x-4' : ''}`} />
-            </button>
-            <span className="text-white text-sm font-medium flex-1">Dividir cuenta</span>
-            {dividir && (
-              <div className="flex items-center gap-2">
-                <button onClick={() => setPersonas(p => Math.max(2, p - 1))}
-                  className="w-7 h-7 rounded-lg bg-slate-600 text-white font-bold">−</button>
-                <span className="text-white font-black text-lg w-8 text-center">{personas}</span>
-                <button onClick={() => setPersonas(p => p + 1)}
-                  className="w-7 h-7 rounded-lg bg-slate-600 text-white font-bold">+</button>
-                <span className="text-amber-400 font-black text-sm">{totalPorPers && fmtEur(totalPorPers)}</span>
-              </div>
-            )}
-          </div>
-
-          {/* Factura fiscal */}
-          {cliente && (
-            <label className="flex items-center gap-3 bg-slate-700/50 rounded-xl px-4 py-3 cursor-pointer">
-              <input type="checkbox" checked={emitirFact} onChange={e => setEmitirFact(e.target.checked)}
-                className="w-5 h-5 rounded accent-amber-500" />
-              <div>
-                <p className="text-white font-semibold text-sm">Emitir factura fiscal</p>
-                <p className="text-slate-400 text-xs">{cliente.nombre} {cliente.apellidos}</p>
-              </div>
-            </label>
+        {/* Total */}
+        <div className="px-5 pb-4 text-center">
+          <p className="text-slate-400 text-xs uppercase font-bold mb-1">Total a cobrar</p>
+          <p className="text-amber-400 font-black text-5xl">{fmtEur(pedido.total)}</p>
+          {mesa.comensales && mesa.comensales > 1 && (
+            <p className="text-slate-500 text-xs mt-1">
+              {mesa.comensales} com. · {fmtEur(pedido.total / mesa.comensales)}/persona
+            </p>
           )}
+        </div>
 
-          {/* Imprimir ticket térmico */}
-          <label className="flex items-center gap-3 bg-slate-700/50 rounded-xl px-4 py-3 cursor-pointer">
-            <input type="checkbox" checked={imprimirTicketTP} onChange={e => setImprimirTicketTP(e.target.checked)}
-              className="w-5 h-5 rounded accent-amber-500" />
-            <div>
-              <p className="text-white font-semibold text-sm">🖨 Imprimir ticket en TPV</p>
-              <p className="text-slate-400 text-xs">Envía a la impresora de barra (requiere QZ Tray)</p>
-            </div>
-          </label>
-
-          {/* Método de pago */}
-          <p className="text-slate-400 text-xs font-bold uppercase">Método de pago</p>
-          <div className="grid grid-cols-3 gap-2">
-            {METODOS_PAGO.map(({ key, label, icon }) => (
+        <div className="px-5 pb-5 space-y-3">
+          {/* 4 botones de método en fila */}
+          <div className="grid grid-cols-4 gap-2">
+            {METODOS_COBRO.map(({ key, label, icon }) => (
               <button key={key} onClick={() => setMetodo(key)}
-                className={`py-3 rounded-xl font-bold text-sm flex flex-col items-center gap-1 transition-all ${metodo === key ? 'bg-amber-500 text-black scale-105' : 'bg-slate-700 text-white hover:bg-slate-600'}`}>
+                className={`py-3 rounded-xl font-bold text-xs flex flex-col items-center gap-1 transition-all ${
+                  metodo === key
+                    ? 'bg-amber-500 text-black scale-105 shadow-lg'
+                    : 'bg-slate-700 text-white hover:bg-slate-600 active:scale-95'
+                }`}>
                 <span className="text-xl">{icon}</span>
                 {label}
               </button>
             ))}
           </div>
 
-          {/* Efectivo: campo de importe recibido */}
+          {/* Efectivo: input recibido + cambio en la misma línea */}
           {metodo === 'efectivo' && (
-            <div className="bg-slate-900 rounded-xl p-4 space-y-3">
-              <p className="text-slate-400 text-sm">Importe recibido</p>
-              <input
-                autoFocus
-                type="number"
-                min="0"
-                step="0.01"
-                value={efectivoRec}
-                onChange={e => setEfectivoRec(e.target.value)}
-                placeholder={totalConDesc.toFixed(2)}
-                className="w-full bg-slate-700 text-white text-2xl font-black text-right rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-amber-500"
-              />
-              {cambio !== null && cambio >= 0 && (
-                <div className="flex justify-between items-center">
-                  <span className="text-slate-400 font-bold">Cambio</span>
-                  <span className="text-emerald-400 font-black text-2xl">{fmtEur(cambio)}</span>
+            <div className="bg-slate-900 rounded-xl p-3">
+              <div className="flex items-end gap-3">
+                <div className="flex-1">
+                  <p className="text-slate-400 text-xs mb-1">Importe recibido</p>
+                  <input
+                    autoFocus
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={efectivoRec}
+                    onChange={e => setEfectivoRec(e.target.value)}
+                    placeholder={pedido.total.toFixed(2)}
+                    className="w-full bg-slate-700 text-white text-xl font-black text-right rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-amber-500"
+                  />
                 </div>
-              )}
+                {cambio !== null && (
+                  <div className="text-right shrink-0 pb-0.5">
+                    <p className="text-slate-400 text-xs mb-1">Cambio</p>
+                    <p className={`font-black text-xl ${cambio >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                      {fmtEur(Math.abs(cambio))}
+                    </p>
+                  </div>
+                )}
+              </div>
               {cambio !== null && cambio < 0 && (
-                <p className="text-red-400 text-sm font-bold">Importe insuficiente ({fmtEur(Math.abs(cambio))} menos)</p>
+                <p className="text-red-400 text-xs mt-1 font-bold">Importe insuficiente</p>
               )}
             </div>
           )}
@@ -545,13 +499,20 @@ function CobroModal({
             />
           )}
 
-          <button
-            onClick={() => void confirmar()}
-            disabled={loading || !metodo || (metodo === 'efectivo' && cambio !== null && cambio < 0)}
-            className="w-full py-4 bg-emerald-600 hover:bg-emerald-500 active:scale-95 disabled:opacity-50 text-white font-black text-lg rounded-xl transition-all flex items-center justify-center gap-2"
-          >
-            {loading ? <LoadingSpinner size={5} /> : `✅ Confirmar cobro · ${fmtEur(totalConDesc)}`}
-          </button>
+          {/* COBRAR + Cancelar */}
+          <div className="grid grid-cols-2 gap-3 pt-1">
+            <button onClick={onClose}
+              className="py-3 bg-slate-700 hover:bg-slate-600 active:scale-95 text-white font-bold rounded-xl transition-all">
+              Cancelar
+            </button>
+            <button
+              onClick={() => void confirmar()}
+              disabled={loading || !metodo || (metodo === 'efectivo' && cambio !== null && cambio < 0)}
+              className="py-3 bg-emerald-600 hover:bg-emerald-500 active:scale-95 disabled:opacity-50 text-white font-black rounded-xl transition-all flex items-center justify-center gap-2"
+            >
+              {loading ? <LoadingSpinner size={4} /> : '✅ Cobrar'}
+            </button>
+          </div>
         </div>
       </div>
     </div>
@@ -827,21 +788,7 @@ function PedidoPanel({
   const lineasCocina  = pedido.lineas.filter(l => !l.destino || l.destino === 'cocina' || l.destino === 'ambos');
   const tieneComida   = lineasCocina.filter(l => l.destino !== 'barra').length > 0;
 
-  // Totales con IVA desglosado
-  const subtotalBase = useMemo(() => {
-    let reducido = 0, normal = 0, superred = 0;
-    pedido.lineas.forEach(l => {
-      const total = l.precio * l.cantidad;
-      const tipo  = l.tipoIva ?? 'reducido';
-      if (tipo === 'reducido')       reducido  += total;
-      else if (tipo === 'normal')    normal    += total;
-      else if (tipo === 'superreducido') superred += total;
-    });
-    return { reducido, normal, superred };
-  }, [pedido.lineas]);
 
-  const ivaReducido = subtotalBase.reducido * (IVA.reducido / (1 + IVA.reducido));
-  const ivaNormal   = subtotalBase.normal   * (IVA.normal   / (1 + IVA.normal));
 
   const productosFiltrados = useMemo(() => {
     const base = busqueda.trim()
@@ -1213,64 +1160,38 @@ function PedidoPanel({
         </div>
       )}
 
-      {/* ── Totales + botones (siempre visibles) ── */}
-      <div className="shrink-0 bg-slate-800 border-t border-slate-700 px-4 pt-3 pb-3 space-y-3">
-        {/* IVA desglosado */}
-        {pedido.total > 0 && (
-          <div className="space-y-1">
-            {ivaReducido > 0 && (
-              <div className="flex justify-between text-xs text-slate-500">
-                <span>Base imponible 10%</span>
-                <span>{fmtEur(subtotalBase.reducido - ivaReducido)}</span>
-              </div>
-            )}
-            {ivaReducido > 0 && (
-              <div className="flex justify-between text-xs text-slate-500">
-                <span>IVA 10%</span>
-                <span>{fmtEur(ivaReducido)}</span>
-              </div>
-            )}
-            {ivaNormal > 0 && (
-              <div className="flex justify-between text-xs text-slate-500">
-                <span>IVA 21%</span>
-                <span>{fmtEur(ivaNormal)}</span>
-              </div>
-            )}
-            <div className="flex justify-between items-baseline border-t border-slate-700 pt-1">
-              <span className="text-slate-300 font-bold text-sm uppercase">Total</span>
-              <span className="text-amber-400 font-black text-2xl">{fmtEur(pedido.total)}</span>
-            </div>
-          </div>
-        )}
-
-        {/* Botones de acción */}
-        <div className="grid grid-cols-2 gap-2">
+      {/* ── Barra de acción fija ≤80px ── */}
+      <div className="shrink-0 bg-slate-800 border-t border-slate-700 px-3 py-2">
+        {/* Fila 1: total + acciones principales */}
+        <div className="flex items-center gap-2 h-10">
+          <span className="text-amber-400 font-black text-xl flex-1 tabular-nums leading-none">{fmtEur(pedido.total)}</span>
           {pedido.estado === 'abierto' && tieneComida && (
             <button onClick={() => void handleEnviarCocina()} disabled={loadingAct}
-              className="col-span-2 py-3 bg-purple-700 hover:bg-purple-600 disabled:opacity-50 active:scale-95 text-white font-black rounded-xl transition-all flex items-center justify-center gap-2 text-sm">
-              {loadingAct ? <LoadingSpinner size={4} /> : '🍳 Enviar a cocina'}
-            </button>
-          )}
-          {pedido.lineas.length > 0 && pedido.estado !== 'cuenta_pedida' && pedido.estado !== 'cerrado' && (
-            <button onClick={() => void handlePedirCuenta()} disabled={loadingAct}
-              className="py-3 bg-red-800 hover:bg-red-700 disabled:opacity-50 active:scale-95 text-white font-bold rounded-xl transition-all text-sm">
-              💳 Pedir cuenta
+              className="px-3 h-9 bg-purple-700 hover:bg-purple-600 disabled:opacity-50 active:scale-95 text-white font-bold rounded-lg transition-all flex items-center gap-1 text-sm whitespace-nowrap">
+              {loadingAct ? <LoadingSpinner size={3} /> : '🍳 Cocina'}
             </button>
           )}
           {pedido.lineas.length > 0 && (
             <button onClick={onShowCobro} disabled={loadingAct}
-              className={`py-3 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 active:scale-95 text-white font-black rounded-xl transition-all flex items-center justify-center gap-2 text-sm ${
-                !(pedido.estado !== 'cuenta_pedida' && tieneComida && pedido.estado === 'abierto') ? 'col-span-2' : ''
-              }`}>
-              💰 Cobrar (F1)
+              className="px-3 h-9 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 active:scale-95 text-white font-black rounded-lg transition-all flex items-center gap-1 text-sm whitespace-nowrap">
+              💰 Cobrar
             </button>
           )}
         </div>
-        {/* Vaciar mesa */}
-        <button onClick={onVaciar}
-          className="w-full py-2 border border-red-800/60 hover:bg-red-900/30 text-red-500 hover:text-red-400 font-semibold rounded-xl text-xs transition-all">
-          🗑 Vaciar mesa
-        </button>
+        {/* Fila 2: acciones secundarias */}
+        <div className="flex items-center gap-2 h-8 mt-1.5">
+          <button onClick={onVaciar}
+            className="px-2 h-7 border border-red-800/60 hover:bg-red-900/30 text-red-500 hover:text-red-400 font-semibold rounded-lg text-[11px] transition-all whitespace-nowrap">
+            🗑 Vaciar
+          </button>
+          <div className="flex-1" />
+          {pedido.lineas.length > 0 && pedido.estado !== 'cuenta_pedida' && pedido.estado !== 'cerrado' && (
+            <button onClick={() => void handlePedirCuenta()} disabled={loadingAct}
+              className="px-2 h-7 bg-slate-700 hover:bg-red-800/70 disabled:opacity-50 active:scale-95 text-slate-300 hover:text-white font-semibold rounded-lg text-[11px] transition-all whitespace-nowrap">
+              💳 Pedir cuenta
+            </button>
+          )}
+        </div>
       </div>
     </div>
   );
@@ -1596,7 +1517,7 @@ export function TPVView() {
       )}
       {showCobro && selectedPedido && selectedMesa && (
         <CobroModal
-          pedido={selectedPedido} mesa={selectedMesa} cliente={clienteSelec}
+          pedido={selectedPedido} mesa={selectedMesa}
           onCobrar={handleCobrar} onClose={() => setShowCobro(false)}
         />
       )}
