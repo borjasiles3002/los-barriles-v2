@@ -57,7 +57,7 @@ async function getQZ(): Promise<Qz> {
 
 // ─── ESC/POS helpers (impresora térmica 80mm, 48 chars/línea) ────────────────
 
-const ESC = '\x1B', GS = '\x1D', LF = '\x0A';
+const ESC = '\x1B', GS = '\x1D', LF = '\x0A', BEL = '\x07';
 const INIT        = `${ESC}\x40`;
 const BOLD_ON     = `${ESC}\x45\x01`;
 const BOLD_OFF    = `${ESC}\x45\x00`;
@@ -68,6 +68,10 @@ const SIZE_2H     = `${ESC}\x21\x10`;
 const SIZE_NORMAL = `${ESC}\x21\x00`;
 const CUT         = `${GS}\x56\x00`;
 const FEED_3      = `${ESC}\x64\x03`;
+
+// Buzzer cocina: BEL (beep estándar) × 3 + ESC B (Epson/compatible) 5 veces, duración larga
+// Se envía ANTES de INIT para que suene aunque el papel esté aún saliendo
+const BUZZER_COCINA = `${BEL}${BEL}${BEL}${ESC}\x42\x05\x07`;
 
 const W = 48;
 
@@ -101,6 +105,7 @@ function lineasRows(lineas: LineaPedido[], withPrice: boolean): string {
 function buildComanda(job: ColaImpresion): string {
   const header = job.tipo === 'cocina' ? '*** COCINA ***' : '*** BARRA ***';
   return [
+    job.tipo === 'cocina' ? BUZZER_COCINA : '',   // Buzzer solo en cocina
     INIT,
     CENTER,
     SIZE_4X, `LOS BARRILES${LF}`,

@@ -1,16 +1,12 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { usePedidos } from '../hooks/usePedidos';
 import { marcarLineaLista, cambiarEstadoPedido } from '../services/pedidos.service';
 import { playComandaNueva, playCocinaLista } from '../utils/sounds';
 import { FullScreenLoader } from './ui/LoadingSpinner';
 import type { Pedido, LineaPedido } from '../types';
 
-// Solo líneas que van a cocina. Destino barra nunca aparece aquí.
 function esCocina(l: LineaPedido) {
-  if (!l.destino) {
-    console.warn('[Cocina] Línea sin destino definido, tratada como cocina:', l.nombre);
-    return true;
-  }
+  if (!l.destino) return true;
   return l.destino === 'cocina' || l.destino === 'ambos';
 }
 
@@ -34,7 +30,13 @@ function Clock() {
   return <span className="font-mono text-white text-2xl font-black">{time}</span>;
 }
 
-function OrderCard({ pedido }: { pedido: Pedido }) {
+function OrderCard({
+  pedido, isNew, onInteract,
+}: {
+  pedido: Pedido;
+  isNew: boolean;
+  onInteract: () => void;
+}) {
   const [loading, setLoading] = useState(false);
 
   const lineasCocina = pedido.lineas.filter(esCocina);
@@ -47,11 +49,13 @@ function OrderCard({ pedido }: { pedido: Pedido }) {
   const allReady   = lineasCocina.every(l => l.estado === 'listo' || l.estado === 'servido');
 
   const handleMarkLine = async (lineaId: string) => {
+    onInteract();
     try { await marcarLineaLista(pedido.id, lineaId); }
     catch (e) { console.error(e); }
   };
 
   const handleComplete = async () => {
+    onInteract();
     setLoading(true);
     try {
       await cambiarEstadoPedido(pedido.id, 'listo');
@@ -61,15 +65,18 @@ function OrderCard({ pedido }: { pedido: Pedido }) {
   };
 
   return (
-    <div className={`flex flex-col rounded-2xl border-2 overflow-hidden shadow-xl w-72 shrink-0 ${col.card}`}>
+    <div className={`flex flex-col rounded-2xl border-2 overflow-hidden shadow-xl w-72 shrink-0 transition-all ${col.card} ${
+      isNew ? 'ring-4 ring-red-500 ring-offset-2 ring-offset-slate-950' : ''
+    }`}>
       {/* Header */}
       <div className={`px-4 py-3 flex justify-between items-center border-b ${col.header}`}>
         <div>
           <h3 className="text-white font-black text-2xl leading-none">{pedido.mesaNombre}</h3>
-          {pedido.estado === 'listo'
+          {isNew && <span className="text-red-400 text-xs font-black uppercase animate-pulse">● NUEVA</span>}
+          {!isNew && (pedido.estado === 'listo'
             ? <span className="text-emerald-400 text-xs font-bold uppercase">✓ Todo listo</span>
             : <span className="text-slate-400 text-xs">{pendientes} pendiente{pendientes !== 1 ? 's' : ''}</span>
-          }
+          )}
         </div>
         <div className="text-right">
           <p className={`font-mono font-black text-3xl ${col.time}`}>{elapsed}m</p>
@@ -129,24 +136,112 @@ function OrderCard({ pedido }: { pedido: Pedido }) {
 
 export function KitchenView() {
   const { pedidos, loading } = usePedidos(['en_cocina', 'listo']);
-  const prevCount = useRef(0);
 
-  // Filtrar: solo pedidos que tienen al menos una línea de cocina pendiente
+  const [alerting,   setAlerting]   = useState(false);
+  const [alertCount, setAlertCount] = useState(0);
+  const [newIds,     setNewIds]     = useState<Set<string>>(new Set());
+
+  // Refs para no capturar closures en el intervalo
+  const prevIdsRef     = useRef<Set<string>>(new Set());
+  const alertIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const initialLoadRef = useRef(true);   // Ignorar pedidos ya existentes en el primer render
+
   const activePedidos = pedidos.filter(p =>
     p.estado !== 'cerrado' && p.lineas.some(esCocina),
   );
 
-  // Sonido cuando llega una comanda nueva
+  // Detectar comandas nuevas
   useEffect(() => {
     if (loading) return;
-    if (activePedidos.length > prevCount.current) playComandaNueva();
-    prevCount.current = activePedidos.length;
-  }, [activePedidos.length, loading]);
+
+    const currentIds = new Set(activePedidos.map(p => p.id));
+
+    // En la carga inicial, solo registramos los IDs existentes sin alertar
+    if (initialLoadRef.current) {
+      prevIdsRef.current = currentIds;
+      initialLoadRef.current = false;
+      return;
+    }
+
+    const incoming: string[] = [];
+    for (const id of currentIds) {
+      if (!prevIdsRef.current.has(id)) incoming.push(id);
+    }
+
+    // Actualizar referencia de IDs conocidos
+    prevIdsRef.current = currentIds;
+
+    if (incoming.length > 0) {
+      setNewIds(prev => new Set([...prev, ...incoming]));
+      setAlertCount(c => c + incoming.length);
+      setAlerting(true);
+
+      // Sonar inmediatamente y luego cada 2.5s hasta que lo dismissan
+      playComandaNueva();
+      if (alertIntervalRef.current) clearInterval(alertIntervalRef.current);
+      alertIntervalRef.current = setInterval(playComandaNueva, 2500);
+    }
+
+    // Limpiar IDs de pedidos que ya no están activos
+    setNewIds(prev => {
+      const next = new Set<string>();
+      for (const id of prev) { if (currentIds.has(id)) next.add(id); }
+      return next;
+    });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activePedidos.map(p => p.id).join(','), loading]);
+
+  // Limpiar intervalo al desmontar
+  useEffect(() => () => {
+    if (alertIntervalRef.current) clearInterval(alertIntervalRef.current);
+  }, []);
+
+  const dismissAlert = useCallback(() => {
+    setAlerting(false);
+    setAlertCount(0);
+    if (alertIntervalRef.current) {
+      clearInterval(alertIntervalRef.current);
+      alertIntervalRef.current = null;
+    }
+  }, []);
 
   if (loading) return <FullScreenLoader />;
 
   return (
     <div className="flex flex-col h-screen bg-slate-950 overflow-hidden">
+
+      {/* ── Alerta comanda nueva ── */}
+      {alerting && (
+        <>
+          {/* Fondo pulsante */}
+          <div className="fixed inset-0 z-40 pointer-events-none bg-red-600/10 animate-pulse" />
+          {/* Banner */}
+          <div className="fixed top-0 left-0 right-0 z-50 bg-red-600 shadow-2xl">
+            <div className="flex items-center justify-between px-6 py-4">
+              <div className="flex items-center gap-4">
+                <span className="text-4xl animate-bounce select-none">🔔</span>
+                <div>
+                  <p className="text-white font-black text-2xl leading-none uppercase tracking-wide">
+                    {alertCount === 1 ? '¡Nueva comanda!' : `¡${alertCount} comandas nuevas!`}
+                  </p>
+                  <p className="text-red-200 text-sm mt-0.5">
+                    Retira el ticket de la impresora y pulsa VISTO
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={dismissAlert}
+                className="px-8 py-4 bg-white text-red-600 font-black text-xl rounded-2xl hover:bg-red-50 active:scale-95 transition-all shadow-lg uppercase tracking-wide"
+              >
+                ✓ VISTO
+              </button>
+            </div>
+          </div>
+          {/* Spacer para empujar el contenido */}
+          <div className="h-[84px] shrink-0" />
+        </>
+      )}
+
       {/* Header */}
       <div className="shrink-0 bg-slate-900 border-b border-slate-700 px-6 py-3 flex items-center justify-between">
         <div className="flex items-center gap-3">
@@ -181,7 +276,12 @@ export function KitchenView() {
         ) : (
           <div className="flex gap-4 h-full pb-2 items-start">
             {activePedidos.map(pedido => (
-              <OrderCard key={pedido.id} pedido={pedido} />
+              <OrderCard
+                key={pedido.id}
+                pedido={pedido}
+                isNew={newIds.has(pedido.id)}
+                onInteract={dismissAlert}
+              />
             ))}
           </div>
         )}

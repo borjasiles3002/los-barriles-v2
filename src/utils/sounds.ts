@@ -36,9 +36,11 @@ export function playCuentaPedida() {
   beep(523, 0.15, 0.4, 0.36);
 }
 
-/** Comanda nueva en cocina: tono grave corto */
+/** Comanda nueva en cocina: triple bip urgente, volumen alto */
 export function playComandaNueva() {
-  beep(440, 0.2, 0.5, 0);
+  beep(880,  0.12, 0.9, 0);
+  beep(880,  0.12, 0.9, 0.22);
+  beep(1100, 0.18, 1.0, 0.44);
 }
 
 /** Todo listo en cocina: tres tonos ascendentes */
