@@ -6,13 +6,17 @@ const API = '/api/gemini';
 // ─── File → base64 (images: resize to 1920px; PDFs: raw base64) ──────────────
 
 export function fileToBase64(file: File): Promise<{ base64: string; mimeType: string }> {
-  // PDF: send raw as base64 (no canvas)
+  // PDF: use FileReader (native, fast, handles any size)
   if (file.type === 'application/pdf') {
-    return file.arrayBuffer().then(buf => {
-      const bytes = new Uint8Array(buf);
-      let binary = '';
-      bytes.forEach(b => { binary += String.fromCharCode(b); });
-      return { base64: btoa(binary), mimeType: 'application/pdf' };
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const dataUrl = reader.result as string;
+        const base64 = dataUrl.split(',')[1];
+        resolve({ base64, mimeType: 'application/pdf' });
+      };
+      reader.onerror = () => reject(new Error('No se pudo leer el PDF'));
+      reader.readAsDataURL(file);
     });
   }
 
