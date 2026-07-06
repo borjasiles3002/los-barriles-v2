@@ -3,6 +3,35 @@ import type { VercelRequest, VercelResponse } from '@vercel/node';
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY ?? '';
 const GEMINI_BASE    = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent';
 
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+async function geminiPost(body: unknown): Promise<{ candidates?: { content?: { parts?: { text?: string }[] } }[] }> {
+  if (!GEMINI_API_KEY) throw new Error('GEMINI_API_KEY no configurada en Vercel → Dashboard → Settings → Environment Variables');
+
+  const res = await fetch(`${GEMINI_BASE}?key=${GEMINI_API_KEY}`, {
+    method:  'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body:    JSON.stringify(body),
+  });
+
+  if (!res.ok) {
+    const raw = await res.text();
+    // Intentar extraer el mensaje de error del JSON de Gemini
+    let detail = raw.slice(0, 300);
+    try {
+      const j = JSON.parse(raw) as { error?: { message?: string; status?: string } };
+      if (j.error?.message) detail = j.error.message;
+    } catch { /* raw ya está asignado */ }
+    throw new Error(`Gemini ${res.status}: ${detail}`);
+  }
+
+  return res.json() as Promise<{ candidates?: { content?: { parts?: { text?: string }[] } }[] }>;
+}
+
+function extractText(data: { candidates?: { content?: { parts?: { text?: string }[] } }[] }): string {
+  return data.candidates?.[0]?.content?.parts?.[0]?.text ?? '';
+}
+
 // ─── Invoice analysis ────────────────────────────────────────────────────────
 
 async function analyzeInvoice(imageBase64: string, mimeType: string): Promise<unknown> {
@@ -37,32 +66,21 @@ Si no encuentras algún campo, usa null. Responde SOLO con el JSON, sin texto ad
     generationConfig: { temperature: 0.1, maxOutputTokens: 2048 },
   };
 
-  const res = await fetch(`${GEMINI_BASE}?key=${GEMINI_API_KEY}`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  });
+  const data = await geminiPost(body);
+  const text = extractText(data);
 
-  if (!res.ok) {
-    const err = await res.text();
-    throw new Error(`Gemini API error ${res.status}: ${err}`);
-  }
-
-  const data = await res.json() as { candidates?: { content?: { parts?: { text?: string }[] } }[] };
-  const text = data.candidates?.[0]?.content?.parts?.[0]?.text ?? '';
-
-  // Extract JSON from response (Gemini may wrap it in ```json ... ```)
   const jsonMatch = text.match(/```(?:json)?\s*([\s\S]*?)```/) ?? text.match(/(\{[\s\S]*\})/);
   const jsonStr   = jsonMatch ? jsonMatch[1] : text;
-  return JSON.parse(jsonStr.trim());
+  try {
+    return JSON.parse(jsonStr.trim());
+  } catch {
+    throw new Error(`Gemini devolvió texto no JSON: ${text.slice(0, 200)}`);
+  }
 }
 
 // ─── Chat with restaurant context ────────────────────────────────────────────
 
-interface ChatMessage {
-  role: 'user' | 'model';
-  text: string;
-}
+interface ChatMessage { role: 'user' | 'model'; text: string; }
 
 interface RestaurantContext {
   ventasHoy?: number;
@@ -98,140 +116,61 @@ ${context.escandallosAltos?.length
 
 Responde de forma concisa y directa con datos concretos. Cuando des consejos, sé específico con nombres de platos y cantidades. Usa € para moneda.`;
 
-  const contents = messages.map(m => ({
-    role: m.role,
-    parts: [{ text: m.text }],
-  }));
-
   const body = {
     systemInstruction: { parts: [{ text: systemText }] },
-    contents,
+    contents: messages.map(m => ({ role: m.role, parts: [{ text: m.text }] })),
     generationConfig: { temperature: 0.7, maxOutputTokens: 1024 },
   };
 
-  const res = await fetch(`${GEMINI_BASE}?key=${GEMINI_API_KEY}`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  });
-
-  if (!res.ok) {
-    const err = await res.text();
-    throw new Error(`Gemini API error ${res.status}: ${err}`);
-  }
-
-  const data = await res.json() as { candidates?: { content?: { parts?: { text?: string }[] } }[] };
-  return data.candidates?.[0]?.content?.parts?.[0]?.text ?? 'No pude generar una respuesta.';
+  const data = await geminiPost(body);
+  return extractText(data) || 'No pude generar una respuesta.';
 }
 
 // ─── Financial reports ────────────────────────────────────────────────────────
 
 const INFORME_PROMPTS: Record<string, string> = {
-  diario: `Eres el analista financiero del restaurante "Los Barriles". Genera un informe diario conciso (máximo 250 palabras) basado en estos datos reales:
-
-DATOS:
-{{datos}}
-
-El informe debe cubrir en este orden:
-1. Resumen ejecutivo (1-2 frases con los KPIs principales)
-2. Análisis de ventas: hora pico, productos estrella
-3. Situación financiera del día (beneficio, food cost estimado si hay gastos)
-4. 2-3 acciones concretas para mañana
-
-Sé directo y usa números. Sin introducciones genéricas. En español.`,
-
-  semanal: `Eres el analista financiero del restaurante "Los Barriles". Genera un informe semanal conciso (máximo 300 palabras) basado en estos datos reales:
-
-DATOS:
-{{datos}}
-
-El informe debe cubrir:
-1. Resumen de la semana (total ingresos, gastos, beneficio estimado)
-2. El mejor y peor día, con explicación breve
-3. Top 3 productos de la semana
-4. Comparativa con la semana anterior (si hay datos)
-5. Recomendaciones para la próxima semana
-
-Directo y con datos concretos. En español.`,
-
-  mensual: `Eres el analista financiero del restaurante "Los Barriles". Genera un informe mensual (máximo 400 palabras) basado en estos datos reales:
-
-DATOS:
-{{datos}}
-
-El informe debe cubrir:
-1. Resumen ejecutivo del mes
-2. Análisis de tendencias (semanas fuertes/débiles, días pico)
-3. Control de gastos por categoría (porcentaje sobre ingresos)
-4. Food cost estimado si hay datos de compras
-5. Top 5 productos del mes
-6. 3 recomendaciones estratégicas para el próximo mes
-
-Profundidad analítica real, no genérica. En español.`,
-
-  anual: `Eres el analista financiero del restaurante "Los Barriles". Genera un informe anual ejecutivo (máximo 500 palabras) basado en estos datos reales:
-
-DATOS:
-{{datos}}
-
-El informe debe cubrir:
-1. Balance anual: ingresos totales, gastos, beneficio estimado
-2. Estacionalidad: mejores y peores meses
-3. Tendencia: crecimiento o decrecimiento respecto al año
-4. Productos más rentables del año
-5. 4 objetivos estratégicos para el próximo año con métricas concretas
-
-Visión estratégica, datos reales, en español.`,
+  diario: `Eres el analista financiero del restaurante "Los Barriles". Genera un informe diario conciso (máximo 250 palabras) basado en estos datos reales:\n\nDATOS:\n{{datos}}\n\nEl informe debe cubrir en este orden:\n1. Resumen ejecutivo (1-2 frases con los KPIs principales)\n2. Análisis de ventas: hora pico, productos estrella\n3. Situación financiera del día (beneficio, food cost estimado si hay gastos)\n4. 2-3 acciones concretas para mañana\n\nSé directo y usa números. Sin introducciones genéricas. En español.`,
+  semanal: `Eres el analista financiero del restaurante "Los Barriles". Genera un informe semanal conciso (máximo 300 palabras) basado en estos datos reales:\n\nDATOS:\n{{datos}}\n\nEl informe debe cubrir:\n1. Resumen de la semana (total ingresos, gastos, beneficio estimado)\n2. El mejor y peor día, con explicación breve\n3. Top 3 productos de la semana\n4. Recomendaciones para la próxima semana\n\nDirecto y con datos concretos. En español.`,
+  mensual: `Eres el analista financiero del restaurante "Los Barriles". Genera un informe mensual (máximo 400 palabras) basado en estos datos reales:\n\nDATOS:\n{{datos}}\n\nEl informe debe cubrir:\n1. Resumen ejecutivo del mes\n2. Análisis de tendencias (semanas fuertes/débiles, días pico)\n3. Control de gastos por categoría (porcentaje sobre ingresos)\n4. Top 5 productos del mes\n5. 3 recomendaciones estratégicas para el próximo mes\n\nEn español.`,
+  anual:   `Eres el analista financiero del restaurante "Los Barriles". Genera un informe anual ejecutivo (máximo 500 palabras) basado en estos datos reales:\n\nDATOS:\n{{datos}}\n\nEl informe debe cubrir:\n1. Balance anual: ingresos totales, gastos, beneficio estimado\n2. Estacionalidad: mejores y peores meses\n3. Tendencia: crecimiento o decrecimiento\n4. Productos más rentables del año\n5. 4 objetivos estratégicos para el próximo año\n\nVisión estratégica, datos reales, en español.`,
 };
 
 async function generarInforme(tipo: string, datos: unknown): Promise<string> {
-  const promptTemplate = INFORME_PROMPTS[tipo] ?? INFORME_PROMPTS['diario'];
-  const prompt = promptTemplate.replace('{{datos}}', JSON.stringify(datos, null, 2));
+  const prompt = (INFORME_PROMPTS[tipo] ?? INFORME_PROMPTS['diario'])
+    .replace('{{datos}}', JSON.stringify(datos, null, 2));
 
   const body = {
     contents: [{ parts: [{ text: prompt }] }],
     generationConfig: { temperature: 0.4, maxOutputTokens: 2048 },
   };
 
-  const res = await fetch(`${GEMINI_BASE}?key=${GEMINI_API_KEY}`, {
-    method:  'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body:    JSON.stringify(body),
-  });
-
-  if (!res.ok) {
-    const err = await res.text();
-    throw new Error(`Gemini API error ${res.status}: ${err}`);
-  }
-
-  const data = await res.json() as { candidates?: { content?: { parts?: { text?: string }[] } }[] };
-  return data.candidates?.[0]?.content?.parts?.[0]?.text ?? 'No se pudo generar el informe.';
+  const data = await geminiPost(body);
+  return extractText(data) || 'No se pudo generar el informe.';
 }
 
 // ─── Handler ─────────────────────────────────────────────────────────────────
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
-  // CORS
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
 
   if (req.method === 'OPTIONS') return res.status(200).end();
-  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
-  if (!GEMINI_API_KEY) return res.status(500).json({ error: 'GEMINI_API_KEY not configured' });
+  if (req.method !== 'POST')    return res.status(405).json({ error: 'Method not allowed' });
 
   try {
     const { action } = req.body as { action: string };
 
     if (action === 'analyze') {
       const { imageBase64, mimeType } = req.body as { imageBase64: string; mimeType: string };
-      const result = await analyzeInvoice(imageBase64, mimeType);
+      if (!imageBase64) return res.status(400).json({ error: 'Falta imageBase64 en el cuerpo' });
+      const result = await analyzeInvoice(imageBase64, mimeType ?? 'image/jpeg');
       return res.status(200).json({ result });
     }
 
     if (action === 'chat') {
       const { messages, context } = req.body as { messages: ChatMessage[]; context: RestaurantContext };
-      const reply = await chat(messages, context);
+      const reply = await chat(messages, context ?? {});
       return res.status(200).json({ reply });
     }
 
@@ -241,9 +180,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(200).json({ narrative });
     }
 
-    return res.status(400).json({ error: `Unknown action: ${action}` });
+    return res.status(400).json({ error: `Acción desconocida: ${action}` });
   } catch (err) {
-    const msg = err instanceof Error ? err.message : 'Unknown error';
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error('[/api/gemini] Error:', msg);
     return res.status(500).json({ error: msg });
   }
 }

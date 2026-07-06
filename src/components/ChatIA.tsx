@@ -2,50 +2,71 @@ import React, { useEffect, useRef, useState } from 'react';
 import { chatWithAssistant } from '../services/gemini.service';
 import type { RestaurantContext } from '../services/gemini.service';
 import type { ChatMessage } from '../types';
-import { collection, getDocs, query, where, orderBy, limit } from 'firebase/firestore';
+import { collection, getDocs, query, where, limit } from 'firebase/firestore';
 import { db } from '../firebase';
 import { LoadingSpinner } from './ui/LoadingSpinner';
 
 // ─── Load restaurant context from Firestore ───────────────────────────────────
+// Cada query es independiente: si una falla (p.ej. índice no creado) las demás continúan.
+
+async function safeGet<T>(fn: () => Promise<T>, fallback: T, label: string): Promise<T> {
+  try { return await fn(); }
+  catch (e) { console.warn(`[ChatIA] loadContext fallo en "${label}":`, (e as Error).message); return fallback; }
+}
 
 async function loadContext(): Promise<RestaurantContext> {
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  const todayISO = today.toISOString();
+  const todayStr  = new Date().toISOString().slice(0, 10);
+  const semanaStr = new Date(Date.now() - 7 * 86400_000).toISOString().slice(0, 10);
 
-  const semana = new Date(today);
-  semana.setDate(semana.getDate() - 7);
-  const semanaISO = semana.toISOString();
+  // ingresos usa campo fecha='YYYY-MM-DD' → query simple, sin índice compuesto
+  const ingresosHoy  = await safeGet(
+    () => getDocs(query(collection(db, 'ingresos'), where('fecha', '==', todayStr))),
+    null, 'ingresos-hoy',
+  );
+  const ingresosSem  = await safeGet(
+    () => getDocs(query(collection(db, 'ingresos'), where('fecha', '>=', semanaStr), limit(500))),
+    null, 'ingresos-semana',
+  );
+  const stockSnap    = await safeGet(
+    () => getDocs(query(collection(db, 'stock'), limit(200))),
+    null, 'stock',
+  );
+  const alertasSnap  = await safeGet(
+    () => getDocs(query(collection(db, 'alertas'), where('leido', '==', false), limit(15))),
+    null, 'alertas',
+  );
+  const escandSnap   = await safeGet(
+    () => getDocs(query(collection(db, 'escandallos'), limit(30))),
+    null, 'escandallos',
+  );
 
-  const [pedidosHoySnap, pedidosSemanSnap, stockSnap, alertasSnap, escandSnap] =
-    await Promise.all([
-      getDocs(query(collection(db, 'pedidos'), where('estado', '==', 'cerrado'), where('closedAt', '>=', todayISO))),
-      getDocs(query(collection(db, 'pedidos'), where('estado', '==', 'cerrado'), where('closedAt', '>=', semanaISO))),
-      getDocs(query(collection(db, 'stock'), orderBy('nombre'))),
-      getDocs(query(collection(db, 'alertas'), where('leido', '==', false), orderBy('createdAt', 'desc'), limit(10))),
-      getDocs(query(collection(db, 'escandallos'), orderBy('foodCostPct', 'desc'), limit(5))),
-    ]);
+  type IngresoRow = { total: number };
+  type StockRow   = { nombre: string; cantidad: number; stockMinimo: number; unidad: string };
+  type AlertaRow  = { tipo: string; datos: Record<string, unknown> };
+  type EscandRow  = { productoNombre: string; foodCostPct: number; costeTotal: number; precioVenta: number };
 
-  const pedidosHoy  = pedidosHoySnap.docs.map(d => d.data() as { total: number });
-  const pedidosSem  = pedidosSemanSnap.docs.map(d => d.data() as { total: number });
-  const stockItems  = stockSnap.docs.map(d => d.data() as { nombre: string; cantidad: number; stockMinimo: number; unidad: string });
-  const alertasData = alertasSnap.docs.map(d => d.data() as { tipo: string; datos: Record<string, unknown>; mensaje: string });
-  const escandData  = escandSnap.docs.map(d => d.data() as { productoNombre: string; foodCostPct: number; costeTotal: number; precioVenta: number });
+  const hoyRows  = (ingresosHoy?.docs ?? []).map(d => d.data() as IngresoRow);
+  const semRows  = (ingresosSem?.docs ?? []).map(d => d.data() as IngresoRow);
+  const stock    = (stockSnap?.docs   ?? []).map(d => d.data() as StockRow);
+  const alertas  = (alertasSnap?.docs ?? []).map(d => d.data() as AlertaRow);
+  const escand   = (escandSnap?.docs  ?? []).map(d => d.data() as EscandRow);
 
   return {
-    ventasHoy:     pedidosHoy.reduce((s, p) => s + p.total, 0),
-    pedidosHoy:    pedidosHoy.length,
-    ventasSemana:  pedidosSem.reduce((s, p) => s + p.total, 0),
-    stockAlertas:  stockItems.filter(s => s.stockMinimo > 0 && s.cantidad < s.stockMinimo),
-    alertasPrecios: alertasData
+    ventasHoy:    hoyRows.reduce((s, r) => s + (r.total ?? 0), 0),
+    pedidosHoy:   hoyRows.length,
+    ventasSemana: semRows.reduce((s, r) => s + (r.total ?? 0), 0),
+    stockAlertas: stock.filter(s => (s.stockMinimo ?? 0) > 0 && s.cantidad < s.stockMinimo),
+    alertasPrecios: alertas
       .filter(a => a.tipo === 'precio_subida')
       .map(a => ({
-        producto:  String(a.datos.producto ?? ''),
-        proveedor: String(a.datos.proveedor ?? ''),
-        subidaPct: Number(a.datos.subidaPct ?? 0),
+        producto:  String(a.datos?.producto  ?? ''),
+        proveedor: String(a.datos?.proveedor ?? ''),
+        subidaPct: Number(a.datos?.subidaPct ?? 0),
       })),
-    escandallosAltos: escandData
+    escandallosAltos: escand
       .filter(e => e.foodCostPct > 35)
+      .sort((a, b) => b.foodCostPct - a.foodCostPct)
+      .slice(0, 5)
       .map(e => ({ plato: e.productoNombre, foodCost: e.foodCostPct, coste: e.costeTotal, precio: e.precioVenta })),
   };
 }

@@ -3,27 +3,56 @@ import type { ChatMessage, FacturaProducto } from '../types';
 // Always call through /api/gemini (Vercel serverless) to keep the key server-side.
 const API = '/api/gemini';
 
-// ─── Compress image to base64 ─────────────────────────────────────────────────
+// ─── File → base64 (images: resize to 1920px; PDFs: raw base64) ──────────────
 
-export function fileToBase64(file: File, maxSizePx = 1024): Promise<{ base64: string; mimeType: string }> {
+export function fileToBase64(file: File): Promise<{ base64: string; mimeType: string }> {
+  // PDF: send raw as base64 (no canvas)
+  if (file.type === 'application/pdf') {
+    return file.arrayBuffer().then(buf => {
+      const bytes = new Uint8Array(buf);
+      let binary = '';
+      bytes.forEach(b => { binary += String.fromCharCode(b); });
+      return { base64: btoa(binary), mimeType: 'application/pdf' };
+    });
+  }
+
+  // Images: compress to max 1920px, quality 0.85
   return new Promise((resolve, reject) => {
     const img = new Image();
     const url = URL.createObjectURL(file);
     img.onload = () => {
       URL.revokeObjectURL(url);
-      const scale = Math.min(1, maxSizePx / Math.max(img.width, img.height));
-      const w = Math.round(img.width * scale);
+      const MAX = 1920;
+      const scale = Math.min(1, MAX / Math.max(img.width, img.height));
+      const w = Math.round(img.width  * scale);
       const h = Math.round(img.height * scale);
       const canvas = document.createElement('canvas');
       canvas.width  = w;
       canvas.height = h;
       canvas.getContext('2d')!.drawImage(img, 0, 0, w, h);
-      const base64 = canvas.toDataURL('image/jpeg', 0.8).split(',')[1];
+      const base64 = canvas.toDataURL('image/jpeg', 0.85).split(',')[1];
       resolve({ base64, mimeType: 'image/jpeg' });
     };
-    img.onerror = reject;
+    img.onerror = () => {
+      URL.revokeObjectURL(url);
+      reject(new Error('No se pudo leer la imagen'));
+    };
     img.src = url;
   });
+}
+
+function humanizeError(raw: string): string {
+  if (raw.includes('API key not valid') || raw.includes('API_KEY_INVALID'))
+    return 'Clave API de Gemini inválida. Revisa GEMINI_API_KEY en Vercel.';
+  if (raw.includes('GEMINI_API_KEY no configurada'))
+    return 'Clave API no configurada. Ve a Vercel → Settings → Environment Variables.';
+  if (raw.includes('quota') || raw.includes('RESOURCE_EXHAUSTED'))
+    return 'Límite de cuota de Gemini alcanzado. Espera un momento e inténtalo de nuevo.';
+  if (raw.includes('too large') || raw.includes('REQUEST_TOO_LARGE'))
+    return 'El archivo es demasiado grande para Gemini. Usa una imagen más pequeña.';
+  if (raw.includes('SAFETY'))
+    return 'Gemini bloqueó la respuesta por filtros de seguridad.';
+  return raw;
 }
 
 // ─── Invoice analysis (Gemini Vision) ────────────────────────────────────────
@@ -39,17 +68,22 @@ export interface GeminiFacturaResult {
 }
 
 export async function analyzeInvoice(file: File): Promise<GeminiFacturaResult> {
+  // Size check (15 MB limit for inline data)
+  if (file.size > 15 * 1024 * 1024) {
+    throw new Error('El archivo supera 15 MB. Usa una foto de menor resolución.');
+  }
+
   const { base64, mimeType } = await fileToBase64(file);
 
   const res = await fetch(API, {
-    method: 'POST',
+    method:  'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ action: 'analyze', imageBase64: base64, mimeType }),
+    body:    JSON.stringify({ action: 'analyze', imageBase64: base64, mimeType }),
   });
 
   if (!res.ok) {
-    const err = await res.json().catch(() => ({ error: res.statusText })) as { error: string };
-    throw new Error(err.error ?? 'Error al analizar la factura');
+    const body = await res.json().catch(() => ({ error: `HTTP ${res.status}` })) as { error: string };
+    throw new Error(humanizeError(body.error ?? `Error HTTP ${res.status}`));
   }
 
   const { result } = await res.json() as { result: GeminiFacturaResult };
@@ -72,14 +106,14 @@ export async function chatWithAssistant(
   context: RestaurantContext,
 ): Promise<string> {
   const res = await fetch(API, {
-    method: 'POST',
+    method:  'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ action: 'chat', messages, context }),
+    body:    JSON.stringify({ action: 'chat', messages, context }),
   });
 
   if (!res.ok) {
-    const err = await res.json().catch(() => ({ error: res.statusText })) as { error: string };
-    throw new Error(err.error ?? 'Error al conectar con el asistente');
+    const body = await res.json().catch(() => ({ error: `HTTP ${res.status}` })) as { error: string };
+    throw new Error(humanizeError(body.error ?? `Error HTTP ${res.status}`));
   }
 
   const { reply } = await res.json() as { reply: string };

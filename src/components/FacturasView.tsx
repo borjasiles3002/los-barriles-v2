@@ -169,7 +169,8 @@ function FacturaItem({ f }: { f: Factura }) {
 
 export const FacturasView: React.FC = () => {
   const { facturas, loading }             = useFacturas();
-  const fileInputRef                      = useRef<HTMLInputElement>(null);
+  const cameraInputRef                    = useRef<HTMLInputElement>(null);
+  const galleryInputRef                   = useRef<HTMLInputElement>(null);
   const [analyzing, setAnalyzing]         = useState(false);
   const [extracted, setExtracted]         = useState<Omit<Factura, 'id' | 'imagenUrl' | 'procesada' | 'createdAt'> | null>(null);
   const [pendingFile, setPendingFile]     = useState<File | null>(null);
@@ -223,31 +224,56 @@ export const FacturasView: React.FC = () => {
           </div>
         </div>
 
-        {/* Upload button */}
-        <div
-          onClick={() => fileInputRef.current?.click()}
-          className="border-2 border-dashed border-amber-500/50 hover:border-amber-500 rounded-2xl p-6 text-center cursor-pointer transition-colors bg-amber-500/5 hover:bg-amber-500/10"
-        >
+        {/* Upload area */}
+        <div className="border-2 border-dashed border-amber-500/50 rounded-2xl p-6 bg-amber-500/5 space-y-4">
           {analyzing ? (
-            <div className="flex flex-col items-center gap-3">
+            <div className="flex flex-col items-center gap-3 py-2">
               <LoadingSpinner size={8} />
               <p className="text-amber-400 font-bold">Analizando factura con IA...</p>
+              <p className="text-slate-500 text-xs">Gemini está leyendo los datos de la factura</p>
             </div>
           ) : (
-            <div className="flex flex-col items-center gap-2">
-              <span className="text-4xl">📸</span>
-              <p className="text-white font-bold">Subir factura de proveedor</p>
-              <p className="text-slate-400 text-sm">Cámara o galería · Gemini extrae los datos automáticamente</p>
-            </div>
+            <>
+              <p className="text-white font-bold text-center">Añadir factura de proveedor</p>
+              <p className="text-slate-400 text-xs text-center">Gemini extrae proveedor, productos e importes automáticamente</p>
+              <div className="grid grid-cols-2 gap-3">
+                {/* Botón cámara */}
+                <button
+                  onClick={() => cameraInputRef.current?.click()}
+                  className="flex flex-col items-center gap-2 py-4 bg-slate-700 hover:bg-slate-600 active:scale-95 text-white rounded-xl transition-all border border-slate-600"
+                >
+                  <span className="text-3xl">📷</span>
+                  <span className="font-bold text-sm">Hacer foto</span>
+                  <span className="text-slate-400 text-xs">Cámara del dispositivo</span>
+                </button>
+                {/* Botón galería + PDF */}
+                <button
+                  onClick={() => galleryInputRef.current?.click()}
+                  className="flex flex-col items-center gap-2 py-4 bg-slate-700 hover:bg-slate-600 active:scale-95 text-white rounded-xl transition-all border border-slate-600"
+                >
+                  <span className="text-3xl">🖼️</span>
+                  <span className="font-bold text-sm">Subir de galería</span>
+                  <span className="text-slate-400 text-xs">Imagen o PDF</span>
+                </button>
+              </div>
+              {/* Inputs ocultos */}
+              <input
+                ref={cameraInputRef}
+                type="file"
+                accept="image/*"
+                capture="environment"
+                className="hidden"
+                onChange={handleFileSelect}
+              />
+              <input
+                ref={galleryInputRef}
+                type="file"
+                accept="image/*,application/pdf"
+                className="hidden"
+                onChange={handleFileSelect}
+              />
+            </>
           )}
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept="image/*"
-            capture="environment"
-            className="hidden"
-            onChange={handleFileSelect}
-          />
         </div>
 
         {error && (
