@@ -103,10 +103,9 @@ export function subscribeTareasPendientes(
   uid: string,
   callback: (count: number) => void,
 ): Unsubscribe {
-  const q = query(
-    collection(db, 'tareas'),
-    where('asignadoA', '==', uid),
-    where('estado', '!=', 'completada'),
+  // Filtramos estado en JS para evitar índice compuesto con !=
+  const q = query(collection(db, 'tareas'), where('asignadoA', '==', uid));
+  return onSnapshot(q, snap =>
+    callback(snap.docs.filter(d => d.data().estado !== 'completada').length),
   );
-  return onSnapshot(q, snap => callback(snap.size));
 }

@@ -5,13 +5,17 @@ import type { ChatMessage } from '../types';
 import { collection, getDocs, query, where, limit } from 'firebase/firestore';
 import { db } from '../firebase';
 import { LoadingSpinner } from './ui/LoadingSpinner';
+import { friendlyFirestoreError } from '../utils/firestore-errors';
 
 // ─── Load restaurant context from Firestore ───────────────────────────────────
 // Cada query es independiente: si una falla (p.ej. índice no creado) las demás continúan.
 
 async function safeGet<T>(fn: () => Promise<T>, fallback: T, label: string): Promise<T> {
   try { return await fn(); }
-  catch (e) { console.warn(`[ChatIA] loadContext fallo en "${label}":`, (e as Error).message); return fallback; }
+  catch (e) {
+    console.warn(`[ChatIA] loadContext fallo en "${label}":`, (e as Error).message);
+    return fallback;
+  }
 }
 
 async function loadContext(): Promise<RestaurantContext> {
@@ -111,7 +115,7 @@ export const ChatIA: React.FC = () => {
       const reply   = await chatWithAssistant(newMessages, context);
       setMessages(prev => [...prev, { role: 'model', text: reply }]);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Error al conectar con el asistente');
+      setError(friendlyFirestoreError(err));
     } finally {
       setLoading(false);
     }

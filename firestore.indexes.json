@@ -1,11 +1,11 @@
 {
   "indexes": [
     {
-      "collectionGroup": "turnos",
+      "collectionGroup": "tareas",
       "queryScope": "COLLECTION",
       "fields": [
-        { "fieldPath": "completo", "order": "ASCENDING" },
-        { "fieldPath": "entrada", "order": "DESCENDING" }
+        { "fieldPath": "asignadoA", "order": "ASCENDING" },
+        { "fieldPath": "estado",    "order": "ASCENDING" }
       ]
     },
     {
@@ -13,7 +13,39 @@
       "queryScope": "COLLECTION",
       "fields": [
         { "fieldPath": "asignadoA", "order": "ASCENDING" },
-        { "fieldPath": "estado", "order": "ASCENDING" }
+        { "fieldPath": "creadaEn",  "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "tareas",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "asignadoPor", "order": "ASCENDING" },
+        { "fieldPath": "creadaEn",    "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "turnos",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "completo", "order": "ASCENDING" },
+        { "fieldPath": "entrada",  "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "turnos",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "usuarioId", "order": "ASCENDING" },
+        { "fieldPath": "fecha",     "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "facturas_emitidas",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "clienteId", "order": "ASCENDING" },
+        { "fieldPath": "creadaEn",  "order": "DESCENDING" }
       ]
     }
   ],

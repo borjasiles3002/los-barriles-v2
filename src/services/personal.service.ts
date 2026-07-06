@@ -95,10 +95,11 @@ export function subscribePersonal(
 
 export async function getTrabajadorPorPin(pin: string): Promise<AppUser | null> {
   const pinHash = await hashPin(pin);
+  // pinHash es suficientemente selectivo; comprobamos activo en JS
   const snap = await getDocs(
-    query(collection(db, 'usuarios'), where('pinHash', '==', pinHash), where('activo', '==', true)),
+    query(collection(db, 'usuarios'), where('pinHash', '==', pinHash)),
   );
-  if (snap.empty) return null;
-  const d = snap.docs[0];
-  return { uid: d.id, ...d.data() } as AppUser;
+  const doc = snap.docs.find(d => d.data().activo !== false);
+  if (!doc) return null;
+  return { uid: doc.id, ...doc.data() } as AppUser;
 }

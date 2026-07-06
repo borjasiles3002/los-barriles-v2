@@ -17,16 +17,17 @@ function horaStr(): string {
 // ─── Obtener turno abierto del día ────────────────────────────────────────────
 
 export async function getTurnoAbierto(usuarioId: string): Promise<Turno | null> {
+  // Un solo where para evitar índice compuesto; filtramos fecha y completo en JS
   const snap = await getDocs(
     query(
       collection(db, 'turnos'),
       where('usuarioId', '==', usuarioId),
       where('fecha', '==', hoyStr()),
-      where('completo', '==', false),
     ),
   );
-  if (snap.empty) return null;
-  return { id: snap.docs[0].id, ...snap.docs[0].data() } as Turno;
+  const abierto = snap.docs.find(d => d.data().completo === false);
+  if (!abierto) return null;
+  return { id: abierto.id, ...abierto.data() } as Turno;
 }
 
 // ─── Registrar entrada ────────────────────────────────────────────────────────
