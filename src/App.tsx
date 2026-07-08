@@ -5,6 +5,8 @@ import { LoginView } from './components/LoginView';
 import { TPVView } from './components/TPVView';
 import { KitchenView } from './components/KitchenView';
 import { SalaView } from './components/SalaView';
+import { ReservasView } from './components/ReservasView';
+import { useReservasHoy } from './hooks/useReservas';
 
 import { CartaView } from './components/CartaView';
 import { FacturasView } from './components/FacturasView';
@@ -52,7 +54,7 @@ type View =
   | 'dashboard' | 'informes' | 'gastos' | 'cierre'
   | 'facturas' | 'stock' | 'escandallos' | 'rentabilidad' | 'alertas'
   | 'personal' | 'horas' | 'tareas' | 'perfil'
-  | 'apertura' | 'clientes' | 'config';
+  | 'apertura' | 'clientes' | 'reservas' | 'config';
 
 const VIEW_LABELS: Record<View, string> = {
   tpv:          '🍺 TPV',
@@ -74,11 +76,12 @@ const VIEW_LABELS: Record<View, string> = {
   perfil:       '👤 Perfil',
   apertura:     '🌅 Apertura',
   clientes:     '🏷 Clientes',
+  reservas:     '📅 Reservas',
   config:       '⚙ Config',
 };
 
 const VIEWS_GERENTE: View[] = [
-  'tpv', 'sala', 'carta', 'apertura', 'clientes', 'personal', 'horas', 'tareas',
+  'tpv', 'sala', 'carta', 'apertura', 'clientes', 'reservas', 'personal', 'horas', 'tareas',
   'dashboard', 'informes', 'gastos', 'cierre', 'facturas', 'stock',
   'escandallos', 'rentabilidad', 'alertas', 'config', 'perfil',
 ];
@@ -86,8 +89,8 @@ const VIEWS_GERENTE: View[] = [
 const ROLE_VIEWS: Record<Role, View[]> = {
   gerente:  VIEWS_GERENTE,
   admin:    VIEWS_GERENTE,
-  manager:  ['tpv', 'sala', 'carta', 'apertura', 'clientes', 'personal', 'horas', 'tareas', 'dashboard', 'informes', 'gastos', 'cierre', 'perfil'],
-  camarero: ['tpv', 'sala', 'tareas', 'perfil'],
+  manager:  ['tpv', 'sala', 'carta', 'apertura', 'clientes', 'reservas', 'personal', 'horas', 'tareas', 'dashboard', 'informes', 'gastos', 'cierre', 'perfil'],
+  camarero: ['tpv', 'sala', 'reservas', 'tareas', 'perfil'],
   barman:   ['tpv', 'tareas', 'perfil'],
   cocinero: ['kitchen', 'stock', 'tareas', 'perfil'],
 };
@@ -107,15 +110,16 @@ const IA_ROLES: Role[] = ['gerente', 'admin', 'manager'];
 
 function NavBar({
   currentView, allowedViews, onNavigate, userName, onLogout,
-  alertasBadge, tareasBadge,
+  alertasBadge, tareasBadge, reservasBadge,
 }: {
-  currentView:  View;
-  allowedViews: View[];
-  onNavigate:   (v: View) => void;
-  userName:     string;
-  onLogout:     () => void;
-  alertasBadge: number;
-  tareasBadge:  number;
+  currentView:   View;
+  allowedViews:  View[];
+  onNavigate:    (v: View) => void;
+  userName:      string;
+  onLogout:      () => void;
+  alertasBadge:  number;
+  tareasBadge:   number;
+  reservasBadge: number;
 }) {
   return (
     <nav className="fixed bottom-0 left-0 right-0 z-40 bg-slate-900 border-t border-slate-700 flex items-center">
@@ -127,8 +131,9 @@ function NavBar({
             }`}>
             <span className="text-base leading-none">{VIEW_LABELS[v].split(' ')[0]}</span>
             <span className="whitespace-nowrap">{VIEW_LABELS[v].split(' ').slice(1).join(' ')}</span>
-            {v === 'alertas' && alertasBadge > 0 && <Badge count={alertasBadge} />}
-            {v === 'tareas'  && tareasBadge  > 0 && <Badge count={tareasBadge} />}
+            {v === 'alertas'   && alertasBadge  > 0 && <Badge count={alertasBadge} />}
+            {v === 'tareas'    && tareasBadge   > 0 && <Badge count={tareasBadge} />}
+            {v === 'reservas'  && reservasBadge > 0 && <Badge count={reservasBadge} />}
           </button>
         ))}
       </div>
@@ -244,9 +249,11 @@ function MainApp() {
   const [fichajeGateChecked, setFichajeGateChecked] = useState(false);
   const [showFichajeGate,    setShowFichajeGate]    = useState(false);
 
-  const { alertas }  = useAlertas(true);
-  const alertasBadge = alertas.length;
-  const tareasBadge  = useTareasPendientesCount(user?.uid ?? '');
+  const { alertas }       = useAlertas(true);
+  const alertasBadge      = alertas.length;
+  const tareasBadge       = useTareasPendientesCount(user?.uid ?? '');
+  const { reservas: reservasHoy } = useReservasHoy();
+  const reservasBadge = reservasHoy.filter(r => r.estado === 'pendiente' || r.estado === 'confirmada').length;
 
   useEffect(() => {
     if (user) setLocalUser(user);
@@ -340,6 +347,7 @@ function MainApp() {
       )}
       {safeView === 'apertura'     && <AperturaView />}
       {safeView === 'clientes'     && <ClientesView />}
+      {safeView === 'reservas'     && <ReservasView />}
       {safeView === 'config'       && <ConfigRestauranteView />}
 
       {showNav && (
@@ -351,6 +359,7 @@ function MainApp() {
           onLogout={() => void handleLogout()}
           alertasBadge={alertasBadge}
           tareasBadge={tareasBadge}
+          reservasBadge={reservasBadge}
         />
       )}
 

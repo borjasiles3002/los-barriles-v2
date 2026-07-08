@@ -30,6 +30,9 @@ import { useProductosStock }  from '../hooks/useStock';
 import { useColaImpresion }   from '../hooks/useColaImpresion';
 import { encolarImpresion }   from '../services/impresion.service';
 import { getTrabajadorPorPin } from '../services/personal.service';
+import { useReservasHoy }     from '../hooks/useReservas';
+import { cambiarEstadoReserva } from '../services/reservas.service';
+import type { Reserva } from '../types';
 
 // ─── VaciarMesaModal ─────────────────────────────────────────────────────────
 
@@ -729,13 +732,14 @@ function NotificacionesDrawer({
               <span className="text-xl"><NotifIcon tipo={n.tipo} /></span>
               <div className="flex-1 min-w-0">
                 <p className="text-white text-sm font-semibold">
-                  {n.mesaNombre ?? n.productoNombre}
+                  {n.tipo === 'nueva_reserva' ? '📅 Reserva' : (n.mesaNombre ?? n.productoNombre)}
                 </p>
                 <p className="text-slate-400 text-xs">
                   {n.tipo === 'pedido_listo'  && 'Pedido listo para servir'}
                   {n.tipo === 'cuenta_pedida' && 'Han pedido la cuenta'}
                   {n.tipo === 'stock_agotado' && 'Producto agotado'}
                   {n.tipo === 'stock_bajo'    && `Stock bajo (${n.stockActual ?? 0} uds.)`}
+                  {n.tipo === 'nueva_reserva' && (n.mensaje ?? 'Nueva reserva')}
                 </p>
                 <p className="text-slate-600 text-[10px] mt-0.5">
                   {new Date(n.createdAt).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })}
@@ -1365,6 +1369,109 @@ function StatsBar({ ingresos, onCierre }: { ingresos: Ingreso[]; onCierre: () =>
   );
 }
 
+// ─── ReservasPanelTPV ────────────────────────────────────────────────────────
+
+function ReservasPanelTPV({
+  reservas, mesas, user, onClose,
+}: {
+  reservas: Reserva[];
+  mesas: Mesa[];
+  user: { uid: string; nombre: string; role: string } | null;
+  onClose: () => void;
+}) {
+  const now  = new Date();
+  const nowM = now.getHours() * 60 + now.getMinutes();
+
+  const handleHaLlegado = async (r: Reserva) => {
+    try {
+      await cambiarEstadoReserva(r.id, 'sentada');
+      if (r.mesaId && r.mesaNombre) {
+        const mesa = mesas.find(m => m.id === r.mesaId);
+        if (mesa && mesa.estado === 'libre') {
+          try {
+            await abrirMesa(r.mesaId, r.mesaNombre, user?.uid ?? '', user?.nombre ?? '', r.comensales);
+          } catch { /* mesa ya ocupada */ }
+        }
+      }
+    } catch (e) { console.error(e); }
+  };
+
+  const handleNoShow = async (r: Reserva) => {
+    try { await cambiarEstadoReserva(r.id, 'no_show'); }
+    catch (e) { console.error(e); }
+  };
+
+  const ESTADO_COLORS: Record<string, string> = {
+    pendiente:  'text-slate-400',
+    confirmada: 'text-blue-400',
+    sentada:    'text-emerald-400',
+    completada: 'text-slate-600',
+    no_show:    'text-red-400',
+    cancelada:  'text-slate-600',
+  };
+
+  const sorted = [...reservas].sort((a, b) => a.hora.localeCompare(b.hora));
+
+  return (
+    <div className="fixed inset-0 z-[55] flex justify-end" onClick={onClose}>
+      <div className="w-full max-w-sm bg-slate-800 border-l border-slate-700 flex flex-col shadow-2xl"
+        onClick={e => e.stopPropagation()}>
+        <div className="p-4 border-b border-slate-700 flex items-center justify-between">
+          <h3 className="text-white font-bold">📅 Reservas hoy</h3>
+          <button onClick={onClose} className="text-slate-400 hover:text-white text-xl">×</button>
+        </div>
+        <div className="flex-1 overflow-y-auto p-3 space-y-2">
+          {sorted.length === 0 && (
+            <p className="text-slate-500 text-center mt-8">Sin reservas hoy</p>
+          )}
+          {sorted.map(r => {
+            const [hh, mm] = r.hora.split(':').map(Number);
+            const rM   = (hh ?? 0) * 60 + (mm ?? 0);
+            const diff = rM - nowM;
+            const soon = diff >= 0 && diff <= 15;
+            const past = diff < 0;
+            return (
+              <div key={r.id} className={`bg-slate-700/60 rounded-xl p-3 space-y-2 ${past && r.estado === 'pendiente' ? 'border border-red-700/50' : ''}`}>
+                <div className="flex items-start justify-between gap-2">
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-amber-400 font-black tabular-nums">{r.hora}</span>
+                      {soon && (
+                        <span className="text-[10px] bg-amber-500 text-black font-black px-1.5 py-0.5 rounded-full">¡Pronto!</span>
+                      )}
+                    </div>
+                    <p className="text-white font-semibold text-sm">{r.nombre}</p>
+                    <p className="text-slate-400 text-xs">{r.comensales} pax</p>
+                  </div>
+                  <span className={`text-xs font-bold ${ESTADO_COLORS[r.estado] ?? 'text-slate-400'}`}>
+                    {r.estado}
+                  </span>
+                </div>
+                {r.estado !== 'sentada' && r.estado !== 'completada' && r.estado !== 'cancelada' && r.estado !== 'no_show' && (
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => void handleHaLlegado(r)}
+                      className="flex-1 py-1.5 bg-emerald-700 hover:bg-emerald-600 text-emerald-100 text-xs font-bold rounded-lg transition-colors"
+                    >
+                      ✅ Ha llegado
+                    </button>
+                    <button
+                      onClick={() => void handleNoShow(r)}
+                      className="flex-1 py-1.5 bg-red-800 hover:bg-red-700 text-red-200 text-xs font-bold rounded-lg transition-colors"
+                    >
+                      ❌ No show
+                    </button>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── TPV View principal ───────────────────────────────────────────────────────
 
 export function TPVView() {
@@ -1374,6 +1481,7 @@ export function TPVView() {
   const { categorias, productos }      = useCarta();
   const { notificaciones }             = useNotificaciones();
   const { ingresos }                   = useIngresosHoy();
+  const { reservas: reservasHoy }      = useReservasHoy();
   useProductosStock();   // keep subscription alive for stock badges in PedidoPanel
   useColaImpresion();    // TPV principal: procesa trabajos de impresión vía QZ Tray
 
@@ -1385,7 +1493,10 @@ export function TPVView() {
   const [showNotif,        setShowNotif]         = useState(false);
   const [showGestionMesas, setShowGestionMesas]  = useState(false);
   const [showVaciarMesa,   setShowVaciarMesa]    = useState(false);
+  const [showReservas,     setShowReservas]      = useState(false);
   const [clienteSelec,     setClienteSelec]      = useState<Cliente | null>(null);
+
+  const reservasActivasHoy = reservasHoy.filter(r => r.estado === 'pendiente' || r.estado === 'confirmada');
 
   // Pedido de la mesa seleccionada en tiempo real (viene de usePedidos)
   const selectedMesa   = selectedMesaId ? mesas.find(m => m.id === selectedMesaId) : null;
@@ -1487,12 +1598,13 @@ export function TPVView() {
         if (showCobro) { setShowCobro(false); return; }
         if (showCierre) { setShowCierre(false); return; }
         if (showNotif) { setShowNotif(false); return; }
+        if (showReservas) { setShowReservas(false); return; }
         setSelectedMesaId(null);
       }
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [selectedPedido, showCobro, showCierre, showNotif]);
+  }, [selectedPedido, showCobro, showCierre, showNotif, showReservas]);
 
   if (mesasLoading || pedidosLoading) return <FullScreenLoader />;
 
@@ -1527,6 +1639,14 @@ export function TPVView() {
       {showNotif && (
         <NotificacionesDrawer notificaciones={notificaciones} onClose={() => setShowNotif(false)} />
       )}
+      {showReservas && (
+        <ReservasPanelTPV
+          reservas={reservasHoy}
+          mesas={mesas}
+          user={user}
+          onClose={() => setShowReservas(false)}
+        />
+      )}
 
       {/* ── Top bar ── */}
       <div className="shrink-0 bg-slate-800 border-b border-slate-700 px-4 py-2.5 flex items-center justify-between gap-3">
@@ -1559,6 +1679,17 @@ export function TPVView() {
               <span className="text-lg">🗺️</span>
             </button>
           )}
+          {/* Reservas */}
+          <button onClick={() => setShowReservas(s => !s)}
+            className={`relative p-2 rounded-lg transition ${showReservas ? 'bg-amber-500' : 'bg-slate-700 text-slate-300 hover:bg-slate-600'}`}
+            title="Reservas de hoy">
+            <span className="text-lg">📅</span>
+            {reservasActivasHoy.length > 0 && (
+              <span className="absolute -top-1 -right-1 w-4 h-4 bg-amber-500 text-black text-[9px] font-black rounded-full flex items-center justify-center">
+                {reservasActivasHoy.length > 9 ? '9+' : reservasActivasHoy.length}
+              </span>
+            )}
+          </button>
           {/* Notificaciones */}
           <button onClick={() => setShowNotif(s => !s)}
             className={`relative p-2 rounded-lg transition ${showNotif ? 'bg-amber-500' : 'bg-slate-700 text-slate-300 hover:bg-slate-600'}`}>

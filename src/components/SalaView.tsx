@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useMesas } from '../hooks/useMesas';
 import { usePedidos } from '../hooks/usePedidos';
 import {
@@ -9,6 +9,7 @@ import { getTrabajadorPorPin } from '../services/personal.service';
 import { addDoc, collection, onSnapshot, doc } from 'firebase/firestore';
 import { db } from '../firebase';
 import { FullScreenLoader } from './ui/LoadingSpinner';
+import { useReservasHoy } from '../hooks/useReservas';
 import type { Mesa, Pedido, LineaPedido } from '../types';
 
 // ─── Reloj ────────────────────────────────────────────────────────────────────
@@ -207,7 +208,7 @@ function PedidoDetailPanel({ mesa, onClose }: { mesa: Mesa; onClose: () => void 
 
 function MesaCard({
   mesa, pedido, editMode, onRename, onDelete, onClick,
-  onPointerDown,
+  onPointerDown, tieneReserva, reservaNombre,
 }: {
   mesa: Mesa;
   pedido?: Pedido;
@@ -216,6 +217,8 @@ function MesaCard({
   onDelete: (id: string) => void;
   onClick: (mesa: Mesa) => void;
   onPointerDown: (e: React.PointerEvent, mesaId: string) => void;
+  tieneReserva?: boolean;
+  reservaNombre?: string;
 }) {
   const [renaming, setRenaming] = useState(false);
   const [draftName, setDraftName] = useState(mesa.nombre);
@@ -232,9 +235,11 @@ function MesaCard({
     setRenaming(false);
   };
 
+  const showReservaBorder = tieneReserva && mesa.estado === 'libre';
+
   return (
     <div
-      className={`relative rounded-2xl border-2 p-3 flex flex-col gap-1.5 select-none transition-colors ${st.bg} ${st.border} ${editMode ? 'cursor-grab active:cursor-grabbing shadow-2xl' : 'cursor-pointer hover:opacity-90'}`}
+      className={`relative rounded-2xl border-2 p-3 flex flex-col gap-1.5 select-none transition-colors ${st.bg} ${showReservaBorder ? 'border-yellow-400' : st.border} ${editMode ? 'cursor-grab active:cursor-grabbing shadow-2xl' : 'cursor-pointer hover:opacity-90'}`}
       style={{ minWidth: 96, minHeight: 80 }}
       onPointerDown={editMode ? e => onPointerDown(e, mesa.id) : undefined}
       onClick={!editMode ? () => onClick(mesa) : undefined}
@@ -279,6 +284,9 @@ function MesaCard({
       )}
       {mesa.comensales != null && mesa.comensales > 0 && (
         <span className="text-[10px] text-slate-500">{mesa.comensales} com.</span>
+      )}
+      {showReservaBorder && reservaNombre && (
+        <span className="text-[10px] text-yellow-400 font-bold truncate">📅 {reservaNombre}</span>
       )}
     </div>
   );
@@ -350,6 +358,7 @@ function PinEditModal({ onSuccess, onClose }: { onSuccess: () => void; onClose: 
 export function SalaView() {
   const { mesas, loading: mLoading }     = useMesas();
   const { pedidos, loading: pLoading }   = usePedidos(['abierto', 'en_cocina', 'listo', 'cuenta_pedida']);
+  const { reservas: reservasHoy }        = useReservasHoy();
   const [editMode, setEditMode]           = useState(false);
   const [showPinModal, setShowPinModal]   = useState(false);
   const [positions, setPositions]         = useState<Record<string, { x: number; y: number }>>({});
@@ -358,6 +367,22 @@ export function SalaView() {
   const containerRef                      = useRef<HTMLDivElement>(null);
   const dragOffset                        = useRef({ dx: 0, dy: 0 });
   const loading = mLoading || pLoading;
+
+  const mesasConReservaProxima = useMemo(() => {
+    const now  = new Date();
+    const nowM = now.getHours() * 60 + now.getMinutes();
+    const map  = new Map<string, string>();
+    for (const r of reservasHoy) {
+      if (!r.mesaId) continue;
+      if (r.estado !== 'pendiente' && r.estado !== 'confirmada') continue;
+      const [hh, mm] = r.hora.split(':').map(Number);
+      const rM = (hh ?? 0) * 60 + (mm ?? 0);
+      if (rM >= nowM && rM - nowM <= 60) {
+        map.set(r.mesaId, r.nombre);
+      }
+    }
+    return map;
+  }, [reservasHoy]);
 
   const pedidoByMesa: Record<string, Pedido> = {};
   pedidos.forEach(p => { pedidoByMesa[p.mesaId] = p; });
@@ -546,6 +571,8 @@ export function SalaView() {
                 onDelete={handleDeleteMesa}
                 onClick={(m) => setSelectedMesaId(m.id)}
                 onPointerDown={handlePointerDown}
+                tieneReserva={mesasConReservaProxima.has(mesa.id)}
+                reservaNombre={mesasConReservaProxima.get(mesa.id)}
               />
             </div>
           );

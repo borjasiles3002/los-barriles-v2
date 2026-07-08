@@ -160,7 +160,8 @@ export interface Producto {
 
 export interface Notificacion {
   id: string;
-  tipo: 'pedido_listo' | 'cuenta_pedida' | 'stock_agotado' | 'stock_bajo';
+  tipo: 'pedido_listo' | 'cuenta_pedida' | 'stock_agotado' | 'stock_bajo' | 'nueva_reserva';
+  mensaje?: string;
   // Pedido notifications
   mesaId?: string;
   pedidoId?: string;
@@ -454,4 +455,38 @@ export interface ColaImpresion {
 export interface ConfigImpresoras {
   impresoraCocina: string;
   impresoraBarra:  string;
+}
+
+// ─── Módulo Reservas ──────────────────────────────────────────────────────────
+
+export type EstadoReserva = 'pendiente' | 'confirmada' | 'sentada' | 'completada' | 'no_show' | 'cancelada';
+export type OrigenReserva = 'telefono' | 'presencial' | 'web';
+export type ZonaReserva   = 'interior' | 'terraza' | 'barra';
+
+export interface Reserva {
+  id: string;
+  nombre: string;
+  telefono: string;
+  email?: string;
+  clienteId?: string;
+  fecha: string;
+  hora: string;
+  comensales: number;
+  mesaId?: string;
+  mesaNombre?: string;
+  zona?: ZonaReserva;
+  estado: EstadoReserva;
+  notas?: string;
+  origen: OrigenReserva;
+  creadaPor: string;
+  createdAt: string;
+}
+
+export interface ConfigReservas {
+  capacidadComida: number;
+  capacidadCena: number;
+  horaInicioComida: string;
+  horaFinComida: string;
+  horaInicioCena: string;
+  horaFinCena: string;
 }

@@ -3,6 +3,7 @@ import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid,
   PieChart, Pie, Cell, Legend,
 } from 'recharts';
+import { useReservasMañana } from '../hooks/useReservas';
 import { useIngresosHoy } from '../hooks/useIngresos';
 import {
   getDatosSemanales, getDatosMensuales,
@@ -38,6 +39,9 @@ function KpiCard({ label, value, sub, color = 'text-amber-400' }: {
 
 export function DashboardView() {
   const { ingresos, loading: loadingHoy } = useIngresosHoy();
+  const { reservas: reservasMañana } = useReservasMañana();
+  const reservasMañanaActivas = reservasMañana.filter(r => r.estado !== 'cancelada' && r.estado !== 'no_show');
+  const paxMañana = reservasMañanaActivas.reduce((s, r) => s + r.comensales, 0);
   const [semanal,      setSemanal]      = useState<DatosSemanales | null>(null);
   const [mensual,      setMensual]      = useState<DatosMensuales | null>(null);
   const [objetivo,     setObjetivo]     = useState(0);
@@ -150,6 +154,14 @@ export function DashboardView() {
             sub={`Beneficio: ${((mensual?.beneficio) ?? 0).toFixed(2)}€`}
           />
         </div>
+
+        {/* Mañana reservas */}
+        <KpiCard
+          label="Reservas mañana"
+          value={`${reservasMañanaActivas.length} reservas`}
+          sub={`${paxMañana} pax`}
+          color="text-amber-400"
+        />
 
         {/* Objetivo mensual */}
         <div className="bg-slate-800 border border-slate-700 rounded-xl p-4">
