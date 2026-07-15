@@ -114,6 +114,7 @@ export interface LineaPedido {
   notas?: string;
   tipoIva?: TipoIva;
   controlStock?: boolean;
+  esManual?: boolean;
 }
 
 export interface Pedido {

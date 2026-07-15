@@ -287,6 +287,26 @@ export function InformesView() {
               </div>
             )}
 
+            {'productosManales' in datos && (datos as DatosDiarios).productosManales.length > 0 && (
+              <div className="bg-slate-800 border border-violet-700/50 rounded-xl p-4">
+                <p className="text-violet-300 font-bold text-sm mb-3">✏️ Productos fuera de carta ({(datos as DatosDiarios).productosManales.length})</p>
+                <div className="space-y-2">
+                  {(datos as DatosDiarios).productosManales.map((p, i) => (
+                    <div key={i} className="flex items-start justify-between gap-2 text-sm border-b border-slate-700 pb-2 last:border-0 last:pb-0">
+                      <div className="flex-1 min-w-0">
+                        <p className="text-white font-semibold truncate">{p.nombre}</p>
+                        <p className="text-slate-400 text-xs">{p.mesa} · {p.camarero}</p>
+                      </div>
+                      <div className="text-right shrink-0">
+                        <p className="text-amber-400 font-bold">{(p.precio * p.cantidad).toFixed(2)}€</p>
+                        <p className="text-slate-500 text-xs">{p.cantidad}× {p.precio.toFixed(2)}€</p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
             {/* Gemini narrative */}
             {loadingNarr && (
               <div className="bg-slate-800 border border-amber-500/30 rounded-xl p-4 text-center">

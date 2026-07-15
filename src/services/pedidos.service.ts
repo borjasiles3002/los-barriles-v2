@@ -418,3 +418,49 @@ export async function getPedidosCerradosHoy(): Promise<Pedido[]> {
     .filter(p => p.closedAt && p.closedAt >= todayISO)
     .sort((a, b) => (b.closedAt ?? '').localeCompare(a.closedAt ?? ''));
 }
+
+export async function agregarProductoManual(
+  pedidoId: string,
+  nombre: string,
+  precio: number,
+  destino: DestinoProducto,
+  tipoIva: TipoIva,
+  nota?: string,
+): Promise<void> {
+  const pedidoRef = doc(db, 'pedidos', pedidoId);
+  await runTransaction(db, async (t) => {
+    const pedidoSnap = await t.get(pedidoRef);
+    if (!pedidoSnap.exists()) throw new Error('Pedido no encontrado');
+    const data = pedidoSnap.data() as Omit<Pedido, 'id'>;
+    const lineas: LineaPedido[] = [...(data.lineas ?? [])];
+    lineas.push({
+      id:          `l-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+      productoId:  `manual_${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+      nombre,
+      precio,
+      cantidad:    1,
+      estado:      'pendiente',
+      destino,
+      tipoIva,
+      controlStock: false,
+      esManual:    true,
+      ...(nota ? { notas: nota } : {}),
+    });
+    const total = round2(lineas.reduce((s, l) => s + l.precio * l.cantidad, 0));
+    t.update(pedidoRef, { lineas, total });
+  });
+}
+
+export async function incrementarLineaManual(pedidoId: string, lineaId: string): Promise<void> {
+  const pedidoRef = doc(db, 'pedidos', pedidoId);
+  await runTransaction(db, async (t) => {
+    const pedidoSnap = await t.get(pedidoRef);
+    if (!pedidoSnap.exists()) return;
+    const data = pedidoSnap.data() as Omit<Pedido, 'id'>;
+    const lineas: LineaPedido[] = (data.lineas ?? []).map(l =>
+      l.id === lineaId ? { ...l, cantidad: l.cantidad + 1 } : l,
+    );
+    const total = round2(lineas.reduce((s, l) => s + l.precio * l.cantidad, 0));
+    t.update(pedidoRef, { lineas, total });
+  });
+}

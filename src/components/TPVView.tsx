@@ -16,7 +16,9 @@ import {
   asignarClienteAPedido, actualizarNotaLinea,
   marcarNotificacionLeida, marcarTodasLeidas,
   vaciarMesa, eliminarMesa, actualizarNombreMesa,
+  incrementarLineaManual,
 } from '../services/pedidos.service';
+import { ProductoLibreModal } from './ProductoLibreModal';
 import { addDoc, collection } from 'firebase/firestore';
 import { db } from '../firebase';
 import { registrarIngreso }              from '../services/ingresos.service';
@@ -779,13 +781,14 @@ function PedidoPanel({
   const [loadingAct,   setLoadingAct]   = useState(false);
   const [addingProd,   setAddingProd]   = useState<string | null>(null);
   const [errorToast,   setErrorToast]   = useState<string | null>(null);
-  const [showCliente,  setShowCliente]  = useState(false);
-  const [clienteBusq,  setClienteBusq]  = useState('');
-  const [clienteRes,   setClienteRes]   = useState<Cliente[]>([]);
-  const [clienteBusc,  setClienteBusc]  = useState(false);
-  const [cliente,      setCliente]      = useState<Cliente | null>(null);
-  const [nuevoCliente, setNuevoCliente] = useState({ nombre: '', apellidos: '', nif: '', email: '' });
-  const [modoNuevoCli, setModoNuevoCli] = useState(false);
+  const [showCliente,      setShowCliente]      = useState(false);
+  const [clienteBusq,      setClienteBusq]      = useState('');
+  const [clienteRes,       setClienteRes]       = useState<Cliente[]>([]);
+  const [clienteBusc,      setClienteBusc]      = useState(false);
+  const [cliente,          setCliente]          = useState<Cliente | null>(null);
+  const [nuevoCliente,     setNuevoCliente]     = useState({ nombre: '', apellidos: '', nif: '', email: '' });
+  const [modoNuevoCli,     setModoNuevoCli]     = useState(false);
+  const [showProductoLibre, setShowProductoLibre] = useState(false);
 
   const min           = elapsed(pedido.createdAt);
   const lineasBebidas = pedido.lineas.filter(l => l.destino === 'barra' || l.destino === 'ambos');
@@ -829,6 +832,18 @@ function PedidoPanel({
     const id = setTimeout(() => setErrorToast(null), 3000);
     return () => clearTimeout(id);
   }, [errorToast]);
+
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === 'F4') { e.preventDefault(); setShowProductoLibre(true); }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, []);
+
+  const handleAddManual = (linea: LineaPedido) => {
+    void incrementarLineaManual(pedido.id, linea.id);
+  };
 
   const handleRemove = useCallback(async (lineaId: string) => {
     setLoadingLine(lineaId);
@@ -890,6 +905,10 @@ function PedidoPanel({
 
   return (
     <div className="flex flex-col h-full bg-slate-900 overflow-hidden relative">
+
+      {showProductoLibre && (
+        <ProductoLibreModal pedidoId={pedido.id} onClose={() => setShowProductoLibre(false)} />
+      )}
 
       {/* ── Toast error añadir producto ── */}
       {errorToast && (
@@ -1058,6 +1077,14 @@ function PedidoPanel({
               ))}
             </div>
           )}
+          <div className="px-3 pt-1 pb-2 shrink-0">
+            <button
+              onClick={() => setShowProductoLibre(true)}
+              className="w-full py-2.5 bg-violet-700 hover:bg-violet-600 active:scale-95 text-white font-bold rounded-xl transition-all flex items-center justify-center gap-2 text-sm"
+            >
+              ✏️ Producto libre <span className="text-violet-300 text-xs">(F4)</span>
+            </button>
+          </div>
           {/* Grid productos */}
           <div className="flex-1 overflow-y-auto p-3 pb-4">
             <div className="grid grid-cols-2 xl:grid-cols-3 gap-2">
@@ -1098,6 +1125,12 @@ function PedidoPanel({
       {/* ── Vista pedido ── */}
       {!showCarta && (
         <div className="flex-1 overflow-y-auto px-3 py-3 space-y-4">
+          <div className="shrink-0 pb-1 border-b border-slate-700/50">
+            <button onClick={() => setShowProductoLibre(true)}
+              className="w-full py-2 bg-violet-800/50 hover:bg-violet-700/70 text-violet-300 hover:text-white font-bold rounded-xl transition-all text-sm flex items-center justify-center gap-2">
+              ✏️ Producto libre
+            </button>
+          </div>
           {pedido.lineas.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-full text-slate-500 py-12">
               <span className="text-4xl mb-2">🛒</span>
@@ -1117,7 +1150,7 @@ function PedidoPanel({
                     {lineasBebidas.filter(l => l.estado === 'pendiente').map(linea => (
                       <LineaRow key={linea.id} linea={linea} pedidoId={pedido.id}
                         loading={loadingLine === linea.id}
-                        onAdd={() => { const p = productos.find(x => x.id === linea.productoId); if (p) void handleAdd(p); }}
+                        onAdd={() => { if (linea.esManual) { handleAddManual(linea); } else { const p = productos.find(x => x.id === linea.productoId); if (p) void handleAdd(p); } }}
                         onRemove={() => void handleRemove(linea.id)}
                         onEditNota={() => { setEditarNota({ lineaId: linea.id, nombre: linea.nombre, notaActual: linea.notas ?? '' }); setNotaTexto(linea.notas ?? ''); }}
                         colorClass="border-blue-800/50 bg-transparent" />
@@ -1134,7 +1167,7 @@ function PedidoPanel({
                     {lineasBebidas.filter(l => l.estado !== 'pendiente').map(linea => (
                       <LineaRow key={linea.id} linea={linea} pedidoId={pedido.id}
                         loading={loadingLine === linea.id}
-                        onAdd={() => { const p = productos.find(x => x.id === linea.productoId); if (p) void handleAdd(p); }}
+                        onAdd={() => { if (linea.esManual) { handleAddManual(linea); } else { const p = productos.find(x => x.id === linea.productoId); if (p) void handleAdd(p); } }}
                         onRemove={() => void handleRemove(linea.id)}
                         onEditNota={() => { setEditarNota({ lineaId: linea.id, nombre: linea.nombre, notaActual: linea.notas ?? '' }); setNotaTexto(linea.notas ?? ''); }}
                         colorClass="border-blue-800/30 bg-blue-950/10" />
@@ -1151,7 +1184,7 @@ function PedidoPanel({
                     {lineasCocina.filter(l => l.destino !== 'barra').map(linea => (
                       <LineaRow key={linea.id} linea={linea} pedidoId={pedido.id}
                         loading={loadingLine === linea.id}
-                        onAdd={() => { const p = productos.find(x => x.id === linea.productoId); if (p) void handleAdd(p); }}
+                        onAdd={() => { if (linea.esManual) { handleAddManual(linea); } else { const p = productos.find(x => x.id === linea.productoId); if (p) void handleAdd(p); } }}
                         onRemove={() => void handleRemove(linea.id)}
                         onEditNota={() => { setEditarNota({ lineaId: linea.id, nombre: linea.nombre, notaActual: linea.notas ?? '' }); setNotaTexto(linea.notas ?? ''); }}
                         colorClass="border-slate-700 bg-slate-800/60" />
@@ -1226,6 +1259,9 @@ function LineaRow({ linea, loading, onAdd, onRemove, onEditNota, colorClass }: {
           <p className={`text-white font-semibold text-xs truncate ${servido ? 'line-through' : ''}`}>
             {linea.nombre}
           </p>
+          {linea.esManual && (
+            <span className="text-[9px] bg-violet-700 text-violet-200 px-1 py-0.5 rounded font-bold shrink-0">libre</span>
+          )}
           <button onClick={onEditNota} className="shrink-0 text-slate-600 hover:text-amber-400 transition text-xs">✏️</button>
         </div>
         {linea.notas && <p className="text-amber-400 text-[10px] italic">⚠ {linea.notas}</p>}

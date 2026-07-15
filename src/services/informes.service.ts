@@ -3,7 +3,7 @@ import { db } from '../firebase';
 import { getIngresosByFecha } from './ingresos.service';
 import { getGastosByFecha } from './gastos.service';
 import { getMondayOfWeek, dateToStr, DIAS_ES, MESES_ES } from '../utils/dates';
-import type { Ingreso, Gasto } from '../types';
+import type { Ingreso, Gasto, LineaPedido } from '../types';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -30,7 +30,22 @@ function agregaIngresos(ingresos: Ingreso[]) {
     porMetodo[ing.metodoPago] = (porMetodo[ing.metodoPago] ?? 0) + ing.total;
   }
 
-  return { totalIngresos, numeroPedidos, ticketMedio, topProductos, porMetodo };
+  const productosManales: DatosDiarios['productosManales'] = [];
+  for (const ing of ingresos) {
+    for (const linea of ing.lineas) {
+      if ((linea as LineaPedido & { esManual?: boolean }).esManual) {
+        productosManales.push({
+          nombre:   linea.nombre,
+          precio:   linea.precio,
+          cantidad: linea.cantidad,
+          mesa:     ing.mesaNombre,
+          camarero: ing.camareroNombre,
+        });
+      }
+    }
+  }
+
+  return { totalIngresos, numeroPedidos, ticketMedio, topProductos, porMetodo, productosManales };
 }
 
 function totalGastos(gastos: Gasto[]): number {
@@ -49,6 +64,7 @@ export interface DatosDiarios {
   ventasPorHora: { hora: string; total: number }[];
   porMetodo: Record<string, number>;
   topProductos: { nombre: string; cantidad: number; total: number }[];
+  productosManales: { nombre: string; precio: number; cantidad: number; mesa: string; camarero: string }[];
 }
 
 export interface DatosSemanales {
