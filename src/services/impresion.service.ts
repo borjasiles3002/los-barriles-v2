@@ -1,23 +1,9 @@
-/**
- * Impresión automática mediante QZ Tray (https://qz.io).
- *
- * Prerrequisitos en el TPV:
- *   1. Instalar QZ Tray desde https://qz.io/download/
- *   2. Abrirlo → botón derecho en bandeja → Advanced → marcar "Allow unsigned"
- *   3. La impresora térmica 80mm debe tener drivers instalados en Windows
- *
- * Flujo:
- *   - Cualquier dispositivo (PDA, tablet) llama a encolarImpresion() → escribe en Firestore /colaImpresion
- *   - El TPV principal ejecuta useColaImpresion() → lee la cola y lanza impresiones vía QZ Tray
- */
-
 import {
   collection, addDoc, getDoc, setDoc, doc,
 } from 'firebase/firestore';
 import { db } from '../firebase';
-import type { ColaImpresion, ConfigImpresoras, LineaPedido } from '../types';
-
-// ─── Interfaz mínima de QZ Tray ───────────────────────────────────────────────
+import type { ColaImpresion, ConfigImpresoras, LineaPedido, ConfigRestaurante } from '../types';
+import { getConfigRestaurante } from './facturasEmitidas.service';
 
 interface QzSecurity {
   setCertificatePromise(fn: (resolve: (cert?: string | null) => void, reject: (e?: unknown) => void) => void): void;
@@ -47,15 +33,12 @@ async function getQZ(): Promise<Qz> {
   const mod = await import('qz-tray') as any;
   _qz = ((mod.default ?? mod) as Qz);
 
-  // Modo sin firma — requiere "Allow unsigned" en QZ Tray → botón derecho bandeja → Advanced
   _qz.security.setCertificatePromise(resolve => { resolve(null); });
   _qz.security.setSignatureAlgorithm('SHA512');
   _qz.security.setSignaturePromise(() => resolve => { resolve(null); });
 
   return _qz;
 }
-
-// ─── ESC/POS helpers (impresora térmica 80mm, 48 chars/línea) ────────────────
 
 const ESC = '\x1B', GS = '\x1D', LF = '\x0A', BEL = '\x07';
 const INIT        = `${ESC}\x40`;
@@ -69,8 +52,6 @@ const SIZE_NORMAL = `${ESC}\x21\x00`;
 const CUT         = `${GS}\x56\x00`;
 const FEED_3      = `${ESC}\x64\x03`;
 
-// Buzzer cocina: BEL (beep estándar) × 3 + ESC B (Epson/compatible) 5 veces, duración larga
-// Se envía ANTES de INIT para que suene aunque el papel esté aún saliendo
 const BUZZER_COCINA = `${BEL}${BEL}${BEL}${ESC}\x42\x05\x07`;
 
 const W = 48;
@@ -85,6 +66,28 @@ function fmtFecha(): string {
   return `${now.toLocaleDateString('es-ES')}  ${now.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })}`;
 }
 function fmtEur(n: number): string { return `${n.toFixed(2)}EUR`; }
+
+function rowLabelValue(label: string, value: string): string {
+  const spaces = Math.max(1, W - label.length - value.length);
+  return `${label}${' '.repeat(spaces)}${value}`;
+}
+
+function calcIVA(lineas: LineaPedido[]): { iva10: number; iva21: number; subtotal: number } {
+  const RATES: Record<string, number> = { reducido: 0.10, superreducido: 0.04, normal: 0.21 };
+  let iva10 = 0, iva21 = 0;
+  lineas.forEach(l => {
+    const rate    = RATES[l.tipoIva ?? 'reducido'] ?? 0.10;
+    const linTotal = l.precio * l.cantidad;
+    if (rate === 0.21) iva21 += linTotal / 1.21 * 0.21;
+    else               iva10 += linTotal / (1 + rate) * rate;
+  });
+  const total = lineas.reduce((s, l) => s + l.precio * l.cantidad, 0);
+  return {
+    iva10:    Math.round(iva10 * 100) / 100,
+    iva21:    Math.round(iva21 * 100) / 100,
+    subtotal: Math.round((total - iva10 - iva21) * 100) / 100,
+  };
+}
 
 function lineasRows(lineas: LineaPedido[], withPrice: boolean): string {
   return lineas.map(l => {
@@ -105,7 +108,7 @@ function lineasRows(lineas: LineaPedido[], withPrice: boolean): string {
 function buildComanda(job: ColaImpresion): string {
   const header = job.tipo === 'cocina' ? '*** COCINA ***' : '*** BARRA ***';
   return [
-    job.tipo === 'cocina' ? BUZZER_COCINA : '',   // Buzzer solo en cocina
+    job.tipo === 'cocina' ? BUZZER_COCINA : '',
     INIT,
     CENTER,
     SIZE_4X, `LOS BARRILES${LF}`,
@@ -123,31 +126,99 @@ function buildComanda(job: ColaImpresion): string {
   ].join('');
 }
 
-function buildTicket(job: ColaImpresion): string {
-  const total = job.total ?? job.lineas.reduce((s, l) => s + l.precio * l.cantidad, 0);
+function buildProforma(
+  job:         ColaImpresion,
+  restaurante: ConfigRestaurante | null,
+  comensales?: number,
+): string {
+  const total   = job.total ?? job.lineas.reduce((s, l) => s + l.precio * l.cantidad, 0);
+  const { iva10, iva21, subtotal } = calcIVA(job.lineas);
+  const nombre  = restaurante?.nombre   ?? 'LOS BARRILES';
+  const dir     = restaurante?.direccion ?? '';
+  const comStr  = comensales ? `Comensales: ${comensales}` : '';
+
   return [
     INIT,
     CENTER,
-    SIZE_4X, `LOS BARRILES${LF}`,
+    SIZE_4X, `${nombre}${LF}`,
     SIZE_NORMAL,
+    dir   ? `${centerText(dir)}${LF}` : '',
     `${divider('=')}${LF}`,
-    `${centerText(job.mesaNombre)}${LF}`,
+    SIZE_2H, BOLD_ON, `${centerText(job.mesaNombre)}${LF}`, BOLD_OFF, SIZE_NORMAL,
+    comStr ? `${centerText(comStr)}${LF}` : '',
     `${centerText(fmtFecha())}${LF}`,
     `${divider('=')}${LF}`,
     LEFT,
     lineasRows(job.lineas, true),
-    `${divider('=')}${LF}`,
+    `${divider()}${LF}`,
+    iva10 > 0 ? `${rowLabelValue('Base imp.:', fmtEur(subtotal))}${LF}` : '',
+    iva10 > 0 ? `${rowLabelValue('IVA 10%:', fmtEur(iva10))}${LF}` : '',
+    iva21 > 0 ? `${rowLabelValue('IVA 21%:', fmtEur(iva21))}${LF}` : '',
+    `${divider()}${LF}`,
     CENTER, SIZE_2H, BOLD_ON,
     `TOTAL: ${fmtEur(total)}${LF}`,
     BOLD_OFF, SIZE_NORMAL,
-    `${centerText('Gracias por su visita!')}${LF}`,
-    `${centerText('Los Barriles')}${LF}`,
+    `${divider('─')}${LF}`,
+    `${centerText('─ CUENTA PROVISIONAL ─')}${LF}`,
+    `${centerText('No válido como factura')}${LF}`,
     FEED_3,
     CUT,
   ].join('');
 }
 
-// Convierte una cadena de bytes ESC/POS a hex para envío seguro a QZ Tray
+const METODO_LABEL: Record<string, string> = {
+  efectivo: 'Efectivo', tarjeta: 'Tarjeta', bizum: 'Bizum',
+  invitacion: 'Invitación', otros: 'Otros',
+};
+
+function buildTicketCompleto(
+  job:        ColaImpresion,
+  restaurante: ConfigRestaurante | null,
+  numero?:    string,
+  metodoPago?: string,
+  entregado?: number,
+  cambio?:    number,
+): string {
+  const total   = job.total ?? job.lineas.reduce((s, l) => s + l.precio * l.cantidad, 0);
+  const { iva10, iva21, subtotal } = calcIVA(job.lineas);
+  const nombre  = restaurante?.nombre    ?? 'LOS BARRILES';
+  const dir     = restaurante?.direccion ?? '';
+  const nif     = restaurante?.nif       ?? '';
+
+  return [
+    INIT,
+    CENTER,
+    SIZE_4X, `${nombre}${LF}`,
+    SIZE_NORMAL,
+    dir ? `${centerText(dir)}${LF}` : '',
+    nif ? `${centerText(`NIF: ${nif}`)}${LF}` : '',
+    `${divider('=')}${LF}`,
+    numero ? `${centerText(`N\xba ${numero}`)}${LF}` : '',
+    `${centerText(job.mesaNombre)}${LF}`,
+    `${centerText(fmtFecha())}${LF}`,
+    `${divider('=')}${LF}`,
+    LEFT,
+    lineasRows(job.lineas, true),
+    `${divider()}${LF}`,
+    `${rowLabelValue('Base imp.:', fmtEur(subtotal))}${LF}`,
+    iva10 > 0 ? `${rowLabelValue('IVA 10%:', fmtEur(iva10))}${LF}` : '',
+    iva21 > 0 ? `${rowLabelValue('IVA 21%:', fmtEur(iva21))}${LF}` : '',
+    `${divider()}${LF}`,
+    CENTER, SIZE_2H, BOLD_ON,
+    `TOTAL: ${fmtEur(total)}${LF}`,
+    BOLD_OFF, SIZE_NORMAL,
+    LEFT,
+    metodoPago ? `${rowLabelValue('PAGO:', METODO_LABEL[metodoPago] ?? metodoPago)}${LF}` : '',
+    entregado != null ? `${rowLabelValue('Entregado:', fmtEur(entregado))}${LF}` : '',
+    cambio    != null ? `${rowLabelValue('Cambio:', fmtEur(Math.max(0, cambio)))}${LF}` : '',
+    CENTER,
+    `${divider('─')}${LF}`,
+    `${centerText('IVA incluido — ¡Gracias por su visita!')}${LF}`,
+    FEED_3,
+    CUT,
+  ].join('');
+}
+
 function toHex(raw: string): string {
   let hex = '';
   for (let i = 0; i < raw.length; i++) {
@@ -156,12 +227,9 @@ function toHex(raw: string): string {
   return hex;
 }
 
-// ─── API pública ──────────────────────────────────────────────────────────────
-
 export async function conectarQZ(): Promise<void> {
   const qz = await getQZ();
   if (!qz.websocket.isActive()) {
-    // Dejar que QZ Tray detecte el puerto automáticamente (8182 insecure por defecto)
     await qz.websocket.connect({
       host: 'localhost',
       usingSecure: false,
@@ -205,31 +273,53 @@ export async function imprimirPrueba(impresora: string): Promise<void> {
   await qz.print(cfg, [{ type: 'raw', format: 'hex', data: toHex(raw) }]);
 }
 
-export async function imprimirTrabajo(job: ColaImpresion, impresora: string): Promise<void> {
+export async function imprimirPruebaTicket(impresora: string): Promise<void> {
+  const testJob: ColaImpresion = {
+    id: 'test', tipo: 'ticket', mesaNombre: 'Mesa 1',
+    pedidoId: 'test', estado: 'pendiente', createdAt: new Date().toISOString(),
+    numero: 'T-2026-00001',
+    lineas: [
+      { id: 'l1', productoId: 'p1', nombre: 'Chuletón 400g', precio: 24.50, cantidad: 1, estado: 'pendiente', destino: 'cocina', tipoIva: 'reducido' },
+      { id: 'l2', productoId: 'p2', nombre: 'Rioja Crianza', precio: 12.00, cantidad: 2, estado: 'pendiente', destino: 'barra', tipoIva: 'reducido' },
+    ],
+    total: 48.50, metodoPago: 'tarjeta',
+  };
   const qz  = await getQZ();
   if (!qz.websocket.isActive()) await conectarQZ();
-  const raw = job.tipo === 'ticket' ? buildTicket(job) : buildComanda(job);
+  const raw = buildTicketCompleto(testJob, null, 'T-2026-00001', 'tarjeta');
   const cfg = qz.configs.create(impresora);
   await qz.print(cfg, [{ type: 'raw', format: 'hex', data: toHex(raw) }]);
 }
 
-// ─── Cola en Firestore (/colaImpresion) ───────────────────────────────────────
+export async function imprimirTrabajo(job: ColaImpresion, impresora: string): Promise<void> {
+  const qz         = await getQZ();
+  if (!qz.websocket.isActive()) await conectarQZ();
+  const restaurante = await getConfigRestaurante();
+  let raw: string;
+  if (job.tipo === 'proforma') {
+    raw = buildProforma(job, restaurante, job.comensales);
+  } else if (job.tipo === 'ticket') {
+    raw = buildTicketCompleto(job, restaurante, job.numero, job.metodoPago, job.entregado, job.cambio);
+  } else {
+    raw = buildComanda(job);
+  }
+  const cfg = qz.configs.create(impresora);
+  await qz.print(cfg, [{ type: 'raw', format: 'hex', data: toHex(raw) }]);
+}
 
 export async function encolarImpresion(
-  job: Pick<ColaImpresion, 'tipo' | 'mesaNombre' | 'pedidoId' | 'lineas' | 'total'>,
+  job: Pick<ColaImpresion, 'tipo' | 'mesaNombre' | 'pedidoId' | 'lineas'> &
+       Partial<Pick<ColaImpresion, 'total' | 'numero' | 'metodoPago' | 'entregado' | 'cambio' | 'comensales'>>,
 ): Promise<void> {
   try {
-    await addDoc(collection(db, 'colaImpresion'), {
-      ...job,
-      estado:    'pendiente' as const,
-      createdAt: new Date().toISOString(),
-    });
+    await addDoc(collection(db, 'colaImpresion'), Object.fromEntries(
+      Object.entries({ ...job, estado: 'pendiente' as const, createdAt: new Date().toISOString() })
+        .filter(([, v]) => v !== undefined),
+    ));
   } catch (e) {
     console.error('[impresion] Error al encolar trabajo:', e);
   }
 }
-
-// ─── Configuración de impresoras (/configuracion/impresoras) ─────────────────
 
 const configRef = () => doc(db, 'configuracion', 'impresoras');
 

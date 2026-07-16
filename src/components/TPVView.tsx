@@ -19,13 +19,15 @@ import {
   incrementarLineaManual,
 } from '../services/pedidos.service';
 import { ProductoLibreModal } from './ProductoLibreModal';
-import { addDoc, collection } from 'firebase/firestore';
+import { addDoc, collection, doc, updateDoc } from 'firebase/firestore';
 import { db } from '../firebase';
 import { registrarIngreso }              from '../services/ingresos.service';
 import { buscarClientes, crearCliente, registrarVisitaCliente } from '../services/clientes.service';
 import {
   emitirFactura, generarPDFFactura, generarPDFTicket, getConfigRestaurante,
 } from '../services/facturasEmitidas.service';
+import { crearTicket, getConfigTickets } from '../services/tickets.service';
+import type { Ticket } from '../types';
 import { LoadingSpinner, FullScreenLoader } from './ui/LoadingSpinner';
 import { StockBadge }         from './AperturaView';
 import { useProductosStock }  from '../hooks/useStock';
@@ -883,6 +885,22 @@ function PedidoPanel({
     finally { setLoadingAct(false); }
   };
 
+  const handleProforma = async () => {
+    setLoadingAct(true);
+    try {
+      await encolarImpresion({
+        tipo:        'proforma',
+        mesaNombre:  mesa.nombre,
+        pedidoId:    pedido.id,
+        lineas:      pedido.lineas,
+        total:       pedido.total,
+        comensales:  mesa.comensales,
+      });
+      await updateDoc(doc(db, 'pedidos', pedido.id), { ticketImpreso: true });
+    } catch (e) { console.error(e); }
+    finally { setLoadingAct(false); }
+  };
+
   const handleBuscarCliente = async () => {
     if (!clienteBusq.trim()) return;
     setClienteBusc(true);
@@ -1206,6 +1224,13 @@ function PedidoPanel({
             <button onClick={() => void handleEnviarCocina()} disabled={loadingAct}
               className="px-3 h-9 bg-purple-700 hover:bg-purple-600 disabled:opacity-50 active:scale-95 text-white font-bold rounded-lg transition-all flex items-center gap-1 text-sm whitespace-nowrap">
               {loadingAct ? <LoadingSpinner size={3} /> : '🍳 Cocina'}
+            </button>
+          )}
+          {pedido.lineas.length > 0 && (
+            <button onClick={() => void handleProforma()} disabled={loadingAct}
+              title="Imprimir pre-cuenta (no cierra el pedido)"
+              className="px-3 h-9 bg-slate-600 hover:bg-slate-500 disabled:opacity-50 active:scale-95 text-white font-bold rounded-lg transition-all flex items-center gap-1 text-sm whitespace-nowrap">
+              🖨️
             </button>
           )}
           {pedido.lineas.length > 0 && (
@@ -1573,7 +1598,7 @@ export function TPVView() {
     } finally { setOpeningMesa(null); }
   };
 
-  const handleCobrar = async (metodo: MetodoPago, total: number, emitirFact: boolean, _motivo?: string, imprimirTicket?: boolean) => {
+  const handleCobrar = async (metodo: MetodoPago, total: number, emitirFact: boolean, _motivo?: string, _imprimirTicket?: boolean) => {
     if (!selectedPedido || !selectedMesa) return;
     const pedidoSnap  = { ...selectedPedido };
     const mesaSnap    = { ...selectedMesa };
@@ -1589,6 +1614,43 @@ export function TPVView() {
         pedidoSnap.camareroId ?? '', pedidoSnap.camareroNombre ?? '',
       );
       if (clienteSnap) await registrarVisitaCliente(clienteSnap.id, total);
+
+      const IVA_RATES_LOCAL: Record<string, number> = { reducido: 0.10, superreducido: 0.04, normal: 0.21 };
+      let iva10 = 0, iva21 = 0;
+      pedidoSnap.lineas.forEach(l => {
+        const rate     = IVA_RATES_LOCAL[l.tipoIva ?? 'reducido'] ?? 0.10;
+        const linTotal = l.precio * l.cantidad;
+        if (rate === 0.21) iva21 += linTotal / 1.21 * 0.21;
+        else               iva10 += linTotal / (1 + rate) * rate;
+      });
+      iva10 = Math.round(iva10 * 100) / 100;
+      iva21 = Math.round(iva21 * 100) / 100;
+
+      const configTickets = await getConfigTickets();
+      let ticket: Ticket | null = null;
+      if (!(emitirFact && clienteSnap)) {
+        ticket = await crearTicket({
+          tipo:       'ticket',
+          pedidoId:   pedidoSnap.id,
+          mesaId:     mesaSnap.id,
+          mesaNombre: mesaSnap.nombre,
+          lineas:     pedidoSnap.lineas.map(l => ({
+            nombre:         l.nombre,
+            cantidad:       l.cantidad,
+            precioUnitario: l.precio,
+            total:          l.precio * l.cantidad,
+            destino:        l.destino,
+            esManual:       l.esManual,
+          })),
+          total,
+          iva10,
+          iva21,
+          metodoPago: metodo,
+          camarero:   pedidoSnap.camareroNombre ?? '',
+          clienteId:  clienteSnap?.id,
+        });
+      }
+
       const config = await getConfigRestaurante();
       if (emitirFact && clienteSnap) {
         const factura = await emitirFactura({
@@ -1599,10 +1661,16 @@ export function TPVView() {
       } else {
         await generarPDFTicket(pedidoSnap.id, mesaSnap.nombre, pedidoSnap.lineas, total, config);
       }
-      if (imprimirTicket) {
+
+      if (configTickets.imprimirAlCobrar && ticket) {
         void encolarImpresion({
-          tipo: 'ticket', mesaNombre: mesaSnap.nombre,
-          pedidoId: pedidoSnap.id, lineas: pedidoSnap.lineas, total,
+          tipo:        'ticket',
+          mesaNombre:  mesaSnap.nombre,
+          pedidoId:    pedidoSnap.id,
+          lineas:      pedidoSnap.lineas,
+          total,
+          numero:      ticket.numero,
+          metodoPago:  metodo,
         });
       }
     } catch (e) {

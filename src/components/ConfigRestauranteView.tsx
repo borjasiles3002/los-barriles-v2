@@ -1,12 +1,13 @@
 import { useState, useEffect } from 'react';
 import { collection, query, orderBy, limit, onSnapshot } from 'firebase/firestore';
 import { db } from '../firebase';
-import type { ConfigRestaurante, ConfigImpresoras, ColaImpresion } from '../types';
+import type { ConfigRestaurante, ConfigImpresoras, ColaImpresion, ConfigTickets } from '../types';
 import { getConfigRestaurante, saveConfigRestaurante } from '../services/facturasEmitidas.service';
 import {
   getConfigImpresoras, saveConfigImpresoras,
-  conectarQZ, obtenerImpresoras, imprimirPrueba, qzConectado,
+  conectarQZ, obtenerImpresoras, imprimirPrueba, imprimirPruebaTicket, qzConectado,
 } from '../services/impresion.service';
+import { getConfigTickets, saveConfigTickets } from '../services/tickets.service';
 
 const DEFAULT: ConfigRestaurante = {
   nombre: 'Los Barriles',
@@ -31,9 +32,14 @@ export function ConfigRestauranteView() {
   const [pruebaMsg,    setPruebaMsg]    = useState('');
   const [colaJobs,     setColaJobs]     = useState<ColaImpresion[]>([]);
 
+  // ── Tickets ──
+  const [cfgTickets,        setCfgTickets]        = useState<ConfigTickets>({ imprimirAlCobrar: true });
+  const [pruebaTicketMsg,   setPruebaTicketMsg]   = useState('');
+
   useEffect(() => {
     getConfigRestaurante().then(c => { if (c) setConfig(c); setLoading(false); });
     getConfigImpresoras().then(c => setCfgImp(c));
+    getConfigTickets().then(c => setCfgTickets(c));
     qzConectado().then(ok => setQzStatus(ok ? 'conectado' : 'desconocido'));
 
     // Últimos 8 trabajos de la cola
@@ -304,6 +310,48 @@ export function ConfigRestauranteView() {
             </div>
           </div>
         )}
+      </div>
+
+      {/* ── Tickets ── */}
+      <div className="mt-6 bg-slate-800 rounded-2xl p-5 border border-slate-700 space-y-4">
+        <h2 className="text-white font-black text-lg">🖨️ Tickets</h2>
+
+        <div className="flex items-center justify-between">
+          <div>
+            <p className="text-white font-semibold text-sm">Imprimir ticket al cobrar</p>
+            <p className="text-slate-400 text-xs">Se imprime automáticamente en barra al cerrar el pedido</p>
+          </div>
+          <button
+            onClick={() => {
+              const newCfg = { ...cfgTickets, imprimirAlCobrar: !cfgTickets.imprimirAlCobrar };
+              setCfgTickets(newCfg);
+              void saveConfigTickets(newCfg);
+            }}
+            className={`w-12 h-6 rounded-full transition-colors relative ${cfgTickets.imprimirAlCobrar ? 'bg-emerald-500' : 'bg-slate-600'}`}
+          >
+            <span className={`absolute top-1 w-4 h-4 rounded-full bg-white transition-all ${cfgTickets.imprimirAlCobrar ? 'right-1' : 'left-1'}`} />
+          </button>
+        </div>
+
+        <div className="space-y-2">
+          <p className="text-slate-400 text-xs">Prueba de formato de ticket (imprime en impresora de barra)</p>
+          <button
+            onClick={async () => {
+              if (!cfgImp.impresoraBarra) { setPruebaTicketMsg('Sin impresora de barra configurada'); return; }
+              setPruebaTicketMsg('');
+              try {
+                await imprimirPruebaTicket(cfgImp.impresoraBarra);
+                setPruebaTicketMsg('Ticket de prueba enviado');
+              } catch (e) {
+                setPruebaTicketMsg('Error: ' + (e instanceof Error ? e.message : String(e)));
+              }
+            }}
+            className="px-4 py-2 bg-slate-700 hover:bg-slate-600 text-white rounded-xl text-sm font-bold transition"
+          >
+            Imprimir prueba de ticket
+          </button>
+          {pruebaTicketMsg && <p className="text-xs text-slate-400">{pruebaTicketMsg}</p>}
+        </div>
       </div>
     </div>
   );

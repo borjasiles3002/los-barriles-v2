@@ -437,7 +437,7 @@ export interface Objetivo {
 
 // ─── Impresión (QZ Tray) ──────────────────────────────────────────────────────
 
-export type TipoColaImpresion   = 'cocina' | 'barra' | 'ticket';
+export type TipoColaImpresion   = 'cocina' | 'barra' | 'ticket' | 'proforma';
 export type EstadoColaImpresion = 'pendiente' | 'procesado' | 'error';
 
 export interface ColaImpresion {
@@ -451,11 +451,50 @@ export interface ColaImpresion {
   createdAt:    string;
   procesadoAt?: string;
   errorMsg?:    string;
+  numero?:      string;
+  metodoPago?:  MetodoPago;
+  entregado?:   number;
+  cambio?:      number;
+  comensales?:  number;
 }
 
 export interface ConfigImpresoras {
   impresoraCocina: string;
   impresoraBarra:  string;
+}
+
+export interface Ticket {
+  id:             string;
+  numero:         string;
+  tipo:           'proforma' | 'ticket' | 'factura';
+  pedidoId:       string;
+  mesaId:         string;
+  mesaNombre:     string;
+  lineas:         Array<{
+    nombre:          string;
+    cantidad:        number;
+    precioUnitario:  number;
+    total:           number;
+    destino:         string;
+    esManual?:       boolean;
+  }>;
+  subtotal:       number;
+  iva10:          number;
+  iva21:          number;
+  total:          number;
+  metodoPago?:    MetodoPago;
+  entregado?:     number;
+  cambio?:        number;
+  camarero:       string;
+  clienteId?:     string;
+  fecha:          string;
+  hora:           string;
+  timestamp:      string;
+  reimpresiones:  number;
+}
+
+export interface ConfigTickets {
+  imprimirAlCobrar: boolean;
 }
 
 // ─── Módulo Reservas ──────────────────────────────────────────────────────────
