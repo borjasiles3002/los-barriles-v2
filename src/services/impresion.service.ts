@@ -41,6 +41,57 @@ async function getQZ(): Promise<Qz> {
 }
 
 const ESC = '\x1B', GS = '\x1D', LF = '\x0A', BEL = '\x07';
+
+// ─── Logo ESC/POS (cache, cargado una sola vez) ───────────────────────────────
+
+let _logoCache: string | null = null;
+
+async function cargarLogoEscPos(maxWidth = 384): Promise<string> {
+  if (_logoCache !== null) return _logoCache;
+  return new Promise(resolve => {
+    const img = new Image();
+    img.onload = () => {
+      try {
+        const scale = Math.min(1, maxWidth / img.naturalWidth);
+        const w     = Math.round(img.naturalWidth  * scale);
+        const h     = Math.round(img.naturalHeight * scale);
+        const c     = document.createElement('canvas');
+        c.width = w; c.height = h;
+        const ctx = c.getContext('2d')!;
+        ctx.fillStyle = '#FFFFFF';
+        ctx.fillRect(0, 0, w, h);
+        ctx.drawImage(img, 0, 0, w, h);
+        const px       = ctx.getImageData(0, 0, w, h).data;
+        const rowBytes = Math.ceil(w / 8);
+        const bitmap: number[] = [];
+        for (let py = 0; py < h; py++) {
+          for (let bx = 0; bx < rowBytes; bx++) {
+            let byte = 0;
+            for (let bit = 0; bit < 8; bit++) {
+              const x = bx * 8 + bit;
+              if (x < w) {
+                const i = (py * w + x) * 4;
+                if (0.299 * px[i] + 0.587 * px[i+1] + 0.114 * px[i+2] < 140) byte |= (0x80 >> bit);
+              }
+            }
+            bitmap.push(byte);
+          }
+        }
+        // GS v 0: raster bit image, centrado con ESC a 1
+        let cmd = `${ESC}\x61\x01`; // CENTER
+        cmd += `${GS}v\x00\x00`;
+        cmd += String.fromCharCode(rowBytes & 0xFF, (rowBytes >> 8) & 0xFF);
+        cmd += String.fromCharCode(h & 0xFF, (h >> 8) & 0xFF);
+        bitmap.forEach(b => { cmd += String.fromCharCode(b); });
+        cmd += LF;
+        _logoCache = cmd;
+        resolve(cmd);
+      } catch { _logoCache = ''; resolve(''); }
+    };
+    img.onerror = () => { _logoCache = ''; resolve(''); };
+    img.src = '/logo-ticket.jpg';
+  });
+}
 const INIT        = `${ESC}\x40`;
 const BOLD_ON     = `${ESC}\x45\x01`;
 const BOLD_OFF    = `${ESC}\x45\x00`;
@@ -130,6 +181,7 @@ function buildProforma(
   job:         ColaImpresion,
   restaurante: ConfigRestaurante | null,
   comensales?: number,
+  logoBytes  = '',
 ): string {
   const total   = job.total ?? job.lineas.reduce((s, l) => s + l.precio * l.cantidad, 0);
   const { iva10, iva21, subtotal } = calcIVA(job.lineas);
@@ -139,6 +191,7 @@ function buildProforma(
 
   return [
     INIT,
+    logoBytes,
     CENTER,
     SIZE_4X, `${nombre}${LF}`,
     SIZE_NORMAL,
@@ -178,6 +231,7 @@ function buildTicketCompleto(
   metodoPago?: string,
   entregado?: number,
   cambio?:    number,
+  logoBytes  = '',
 ): string {
   const total   = job.total ?? job.lineas.reduce((s, l) => s + l.precio * l.cantidad, 0);
   const { iva10, iva21, subtotal } = calcIVA(job.lineas);
@@ -187,6 +241,7 @@ function buildTicketCompleto(
 
   return [
     INIT,
+    logoBytes,
     CENTER,
     SIZE_4X, `${nombre}${LF}`,
     SIZE_NORMAL,
@@ -284,22 +339,25 @@ export async function imprimirPruebaTicket(impresora: string): Promise<void> {
     ],
     total: 48.50, metodoPago: 'tarjeta',
   };
-  const qz  = await getQZ();
+  const qz   = await getQZ();
   if (!qz.websocket.isActive()) await conectarQZ();
-  const raw = buildTicketCompleto(testJob, null, 'T-2026-00001', 'tarjeta');
-  const cfg = qz.configs.create(impresora);
+  const logo = await cargarLogoEscPos();
+  const raw  = buildTicketCompleto(testJob, null, 'T-2026-00001', 'tarjeta', undefined, undefined, logo);
+  const cfg  = qz.configs.create(impresora);
   await qz.print(cfg, [{ type: 'raw', format: 'hex', data: toHex(raw) }]);
 }
 
 export async function imprimirTrabajo(job: ColaImpresion, impresora: string): Promise<void> {
-  const qz         = await getQZ();
+  const qz          = await getQZ();
   if (!qz.websocket.isActive()) await conectarQZ();
   const restaurante = await getConfigRestaurante();
+  const esTicket    = job.tipo === 'proforma' || job.tipo === 'ticket';
+  const logo        = esTicket ? await cargarLogoEscPos() : '';
   let raw: string;
   if (job.tipo === 'proforma') {
-    raw = buildProforma(job, restaurante, job.comensales);
+    raw = buildProforma(job, restaurante, job.comensales, logo);
   } else if (job.tipo === 'ticket') {
-    raw = buildTicketCompleto(job, restaurante, job.numero, job.metodoPago, job.entregado, job.cambio);
+    raw = buildTicketCompleto(job, restaurante, job.numero, job.metodoPago, job.entregado, job.cambio, logo);
   } else {
     raw = buildComanda(job);
   }

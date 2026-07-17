@@ -109,6 +109,27 @@ export async function emitirFactura(params: {
   return { id: ref.id, ...factura };
 }
 
+// ─── Logo helper para PDF ─────────────────────────────────────────────────────
+
+async function cargarLogoParaPDF(maxWMm = 60): Promise<{ base64: string; w: number; h: number } | null> {
+  return new Promise(resolve => {
+    const img = new Image();
+    img.onload = () => {
+      const mmPerPx = 25.4 / 96;
+      let w = img.naturalWidth  * mmPerPx;
+      let h = img.naturalHeight * mmPerPx;
+      if (w > maxWMm) { h = h * maxWMm / w; w = maxWMm; }
+      const c = document.createElement('canvas');
+      c.width  = img.naturalWidth;
+      c.height = img.naturalHeight;
+      c.getContext('2d')!.drawImage(img, 0, 0);
+      resolve({ base64: c.toDataURL('image/jpeg', 0.9).split(',')[1], w: Math.round(w * 10) / 10, h: Math.round(h * 10) / 10 });
+    };
+    img.onerror = () => resolve(null);
+    img.src = '/logo-ticket.jpg';
+  });
+}
+
 // ─── Generar PDF factura con jsPDF ────────────────────────────────────────────
 
 export async function generarPDFFactura(
@@ -123,10 +144,13 @@ export async function generarPDFFactura(
 
   const addLine = (h = 6) => { y += h; };
 
-  // ── Logo (si existe) ──
-  if (restaurante?.logo) {
-    try { doc.addImage(restaurante.logo, 'PNG', L, y, 30, 15); y += 18; }
-    catch { /* logo invalid, skip */ }
+  // ── Logo ──
+  const logo = await cargarLogoParaPDF(50);
+  if (logo) {
+    try {
+      doc.addImage(logo.base64, 'JPEG', L + (W - logo.w) / 2, y, logo.w, logo.h);
+      y += logo.h + 4;
+    } catch { /* continuar sin logo */ }
   }
 
   // ── Datos restaurante ──
@@ -244,7 +268,16 @@ export async function generarPDFTicket(
   const { jsPDF } = await import('jspdf');
   const doc = new jsPDF({ unit: 'mm', format: [80, 200] });
   const L = 5;
-  let y = 10;
+  let y = 8;
+
+  // ── Logo ──
+  const logo = await cargarLogoParaPDF(60);
+  if (logo) {
+    try {
+      doc.addImage(logo.base64, 'JPEG', (80 - logo.w) / 2, y, logo.w, logo.h);
+      y += logo.h + 3;
+    } catch { /* continuar sin logo */ }
+  }
 
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(12);
