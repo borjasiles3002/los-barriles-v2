@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { getAuth } from 'firebase/auth';
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Legend,
 } from 'recharts';
@@ -12,6 +13,13 @@ import type {
 import { getISOWeek, monthKey } from '../utils/dates';
 import { getTicketsByPeriod, reimprimirTicket } from '../services/tickets.service';
 import type { Ticket } from '../types';
+
+async function geminiAuthHeaders(): Promise<Record<string, string>> {
+  try {
+    const token = await getAuth().currentUser?.getIdToken();
+    return token ? { Authorization: `Bearer ${token}` } : {};
+  } catch { return {}; }
+}
 
 type TabInforme = 'diario' | 'semanal' | 'mensual' | 'anual' | 'tickets';
 type DatosInforme = DatosDiarios | DatosSemanales | DatosMensuales | DatosAnuales;
@@ -50,7 +58,7 @@ function seccionKpis(datos: DatosInforme) {
 async function generarNarrativa(tipo: TabInforme, datos: DatosInforme): Promise<string> {
   const res = await fetch('/api/gemini', {
     method:  'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...await geminiAuthHeaders() },
     body:    JSON.stringify({ action: 'informe', tipo, datos }),
   });
   if (!res.ok) throw new Error(`Error ${res.status}`);
@@ -200,7 +208,7 @@ function TicketsAnalisis() {
     try {
       const res = await fetch('/api/gemini', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...await geminiAuthHeaders() },
         body: JSON.stringify({
           action: 'informe', tipo: 'tickets',
           datos: {

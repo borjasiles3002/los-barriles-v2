@@ -1,7 +1,15 @@
+import { getAuth } from 'firebase/auth';
 import type { ChatMessage, FacturaProducto } from '../types';
 
 // Always call through /api/gemini (Vercel serverless) to keep the key server-side.
 const API = '/api/gemini';
+
+async function authHeaders(): Promise<Record<string, string>> {
+  try {
+    const token = await getAuth().currentUser?.getIdToken();
+    return token ? { Authorization: `Bearer ${token}` } : {};
+  } catch { return {}; }
+}
 
 // ─── File → base64 (images: resize to 1920px; PDFs: raw base64) ──────────────
 
@@ -95,7 +103,7 @@ export async function analyzeInvoice(file: File): Promise<GeminiFacturaResult> {
 
   const res = await fetch(API, {
     method:  'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...await authHeaders() },
     body:    JSON.stringify({ action: 'analyze', imageBase64: base64, mimeType }),
   });
 
@@ -125,7 +133,7 @@ export async function chatWithAssistant(
 ): Promise<string> {
   const res = await fetch(API, {
     method:  'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...await authHeaders() },
     body:    JSON.stringify({ action: 'chat', messages, context }),
   });
 

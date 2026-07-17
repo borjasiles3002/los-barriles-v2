@@ -1,7 +1,41 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 
-const GEMINI_API_KEY = process.env.GEMINI_API_KEY ?? '';
-const GEMINI_BASE    = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent';
+const GEMINI_API_KEY   = process.env.GEMINI_API_KEY ?? '';
+const GEMINI_BASE      = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent';
+const FIREBASE_API_KEY = process.env.FIREBASE_WEB_API_KEY ?? 'AIzaSyCkjDqR6xbrKk6Q3p3I3K_f9D8lQEfRUJY';
+const FIREBASE_PROJECT = 'losbarrilesrestaurante-a18eb';
+
+// ─── Auth helpers ──────────────────────────────────────────────────────────────
+
+async function verifyToken(idToken: string): Promise<string | null> {
+  try {
+    const res = await fetch(
+      `https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=${FIREBASE_API_KEY}`,
+      { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ idToken }) },
+    );
+    if (!res.ok) return null;
+    const data = await res.json() as { users?: Array<{ localId: string }> };
+    return data.users?.[0]?.localId ?? null;
+  } catch { return null; }
+}
+
+async function getUserRole(uid: string, idToken: string): Promise<string | null> {
+  try {
+    const res = await fetch(
+      `https://firestore.googleapis.com/v1/projects/${FIREBASE_PROJECT}/databases/(default)/documents/users/${uid}`,
+      { headers: { Authorization: `Bearer ${idToken}` } },
+    );
+    if (!res.ok) return null;
+    const data = await res.json() as { fields?: { role?: { stringValue?: string } } };
+    return data.fields?.role?.stringValue ?? null;
+  } catch { return null; }
+}
+
+function extractBearerToken(req: VercelRequest): string | null {
+  const h = req.headers['authorization'];
+  const header = Array.isArray(h) ? h[0] : h;
+  return header?.startsWith('Bearer ') ? header.slice(7) : null;
+}
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -160,6 +194,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   try {
     const { action } = req.body as { action: string };
+    const idToken    = extractBearerToken(req);
+
+    // Todas las acciones requieren usuario autenticado
+    if (!idToken) return res.status(401).json({ error: 'Autenticación requerida' });
+    const uid = await verifyToken(idToken);
+    if (!uid) return res.status(401).json({ error: 'Token inválido o expirado' });
 
     if (action === 'analyze') {
       const { imageBase64, mimeType } = req.body as { imageBase64: string; mimeType: string };
@@ -169,6 +209,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     if (action === 'chat') {
+      // El asistente de chat solo es para el gerente
+      const role = await getUserRole(uid, idToken);
+      if (role !== 'gerente') return res.status(403).json({ error: 'Acceso restringido al gerente' });
       const { messages, context } = req.body as { messages: ChatMessage[]; context: RestaurantContext };
       const reply = await chat(messages, context ?? {});
       return res.status(200).json({ reply });

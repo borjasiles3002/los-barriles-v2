@@ -104,7 +104,7 @@ const ROLE_DEFAULT: Record<Role, View> = {
   cocinero: 'kitchen',
 };
 
-const IA_ROLES: Role[] = ['gerente', 'admin', 'manager'];
+const IA_ROLES: Role[] = ['gerente'];
 
 // ─── Nav bar ──────────────────────────────────────────────────────────────────
 
