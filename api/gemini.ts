@@ -22,7 +22,7 @@ async function verifyToken(idToken: string): Promise<string | null> {
 async function getUserRole(uid: string, idToken: string): Promise<string | null> {
   try {
     const res = await fetch(
-      `https://firestore.googleapis.com/v1/projects/${FIREBASE_PROJECT}/databases/(default)/documents/users/${uid}`,
+      `https://firestore.googleapis.com/v1/projects/${FIREBASE_PROJECT}/databases/(default)/documents/usuarios/${uid}`,
       { headers: { Authorization: `Bearer ${idToken}` } },
     );
     if (!res.ok) return null;
