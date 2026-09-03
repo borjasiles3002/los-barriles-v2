@@ -1,7 +1,7 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 
 const GEMINI_API_KEY   = process.env.GEMINI_API_KEY ?? '';
-const GEMINI_BASE      = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent';
+const GEMINI_BASE      = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent';
 const FIREBASE_API_KEY = process.env.FIREBASE_WEB_API_KEY ?? 'AIzaSyCkjDqR6xbrKk6Q3p3I3K_f9D8lQEfRUJY';
 const FIREBASE_PROJECT = 'losbarrilesrestaurante-a18eb';
 

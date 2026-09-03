@@ -1,0 +1,189 @@
+rules_version = '2';
+
+// Los Barriles v2 — reglas definitivas basadas en roles.
+// Roles (src/types.ts): gerente | admin (alias de gerente) | manager | camarero | barman | cocinero
+//
+// Excepción explícita sin login: /fichaje (kiosko de fichar entrada/salida).
+// Requiere lectura pública de 'usuarios' (incluye pinHash) y escritura pública
+// de 'turnos'/'fichajes'. Ver informe de la revisión para el riesgo asociado
+// y cómo mitigarlo (mover la verificación del PIN a un endpoint servidor).
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ── Helpers ──────────────────────────────────────────────────────────────
+
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function userExists() {
+      return signedIn()
+        && exists(/databases/$(database)/documents/usuarios/$(request.auth.uid));
+    }
+
+    function role() {
+      return userExists()
+        ? get(/databases/$(database)/documents/usuarios/$(request.auth.uid)).data.role
+        : null;
+    }
+
+    // Acceso total: gerente / admin (alias histórico de gerente)
+    function isGerente() {
+      return role() in ['gerente', 'admin'];
+    }
+
+    // Gerencia amplia: gerente + manager (ve personal, horas, gastos, cierres...)
+    function isStaffMgmt() {
+      return role() in ['gerente', 'admin', 'manager'];
+    }
+
+    // Cocina + gerencia: únicos con acceso a inventario de materias primas
+    function isCocinaStock() {
+      return role() in ['gerente', 'admin', 'cocinero'];
+    }
+
+    // Cualquier trabajador con cuenta y rol reconocido (TPV, sala, cocina...)
+    function isStaff() {
+      return role() in ['gerente', 'admin', 'manager', 'camarero', 'barman', 'cocinero'];
+    }
+
+    function isOwner(uid) {
+      return signedIn() && request.auth.uid == uid;
+    }
+
+    // ── Usuarios / personal ────────────────────────────────────────────────────
+
+    match /usuarios/{uid} {
+      // Lectura pública: la requiere /fichaje (kiosko sin login) para listar
+      // trabajadores y verificar el PIN. Riesgo aceptado explícitamente — ver informe.
+      allow read: if true;
+      allow create: if isOwner(uid) || isStaffMgmt();
+      allow update: if isStaffMgmt()
+        || (isOwner(uid)
+            && request.resource.data.role   == resource.data.role
+            && request.resource.data.activo == resource.data.activo
+            && request.resource.data.email  == resource.data.email);
+      allow delete: if isStaffMgmt();
+    }
+
+    // ── Fichaje (kiosko público /fichaje) ──────────────────────────────────────
+
+    match /turnos/{id} {
+      allow read: if true;
+      allow create: if true;
+      allow update: if true; // registrarSalida cierra el turno desde el kiosko
+      allow delete: if isStaffMgmt();
+    }
+
+    match /fichajes/{id} {
+      allow read: if isStaffMgmt();
+      allow create: if true;
+      allow update, delete: if isGerente();
+    }
+
+    // ── Operación diaria (TPV / cocina / sala) ─────────────────────────────────
+
+    match /mesas/{id} {
+      allow read, write: if isStaff();
+    }
+    match /pedidos/{id} {
+      allow read, write: if isStaff();
+    }
+    match /notificaciones/{id} {
+      allow read, write: if isStaff();
+    }
+    match /colaImpresion/{id} {
+      allow read, write: if isStaff();
+    }
+    match /tickets/{id} {
+      allow read, write: if isStaff();
+    }
+    match /contadores/{id} {
+      allow read, write: if isStaff();
+    }
+    match /ingresos/{id} {
+      allow create: if isStaff();
+      allow read: if isStaffMgmt();
+      allow update, delete: if isGerente();
+    }
+
+    // ── Carta ───────────────────────────────────────────────────────────────
+
+    match /carta/{id} {
+      allow read: if isStaff();
+      allow write: if isStaffMgmt();
+    }
+    match /productos/{id} {
+      allow read: if isStaff();
+      allow write: if isStaffMgmt();
+    }
+
+    // ── Clientes / Reservas ────────────────────────────────────────────────
+
+    match /clientes/{id} {
+      allow read, write: if isStaff();
+    }
+    match /reservas/{id} {
+      allow read, write: if isStaff();
+    }
+
+    // ── Tareas ──────────────────────────────────────────────────────────────
+
+    match /tareas/{id} {
+      allow read, write: if isStaff();
+    }
+
+    // ── Stock / escandallos / facturas / alertas ───────────────────────────
+
+    match /stock/{id} {
+      allow read: if isStaff();
+      allow write: if isCocinaStock();
+
+      match /movimientos/{movId} {
+        allow read: if isStaff();
+        allow write: if isCocinaStock();
+      }
+    }
+    match /stockDiario/{id} {
+      allow read: if isStaff();
+      allow write: if isCocinaStock();
+    }
+    match /escandallos/{id} {
+      allow read, write: if isGerente();
+    }
+    match /facturas/{id} {
+      allow read, write: if isGerente();
+    }
+    match /facturas_emitidas/{id} {
+      allow read, write: if isGerente();
+    }
+    match /alertas/{id} {
+      allow read, write: if isGerente();
+    }
+
+    // ── Finanzas / cierres ──────────────────────────────────────────────────
+
+    match /gastos/{id} {
+      allow read, write: if isStaffMgmt();
+    }
+    match /cierres/{id} {
+      allow read, write: if isStaffMgmt();
+    }
+    match /cierresCompletos/{id} {
+      allow read, write: if isStaffMgmt();
+    }
+    match /objetivos/{id} {
+      allow read, write: if isStaffMgmt();
+    }
+
+    // ── Configuración del restaurante ──────────────────────────────────────
+
+    match /configuracion/{id} {
+      allow read: if isStaff();
+      allow write: if isGerente();
+    }
+
+    // Cualquier otra ruta queda denegada por defecto.
+  }
+}
